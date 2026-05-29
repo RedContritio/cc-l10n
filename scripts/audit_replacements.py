@@ -153,7 +153,7 @@ def audit(input_path: Path, translations) -> dict:
 
     # risk D: 检查 hits 之间重叠
     # 完全嵌套 (短 src 完全在长 src 范围内) 不算 risk D — repack 应用时跳过被覆盖的短 src,
-    # 由长 src 的 dst 覆盖整段 (假设 subagent 翻译时已含子段翻译).
+    # 由长 src 的 dst 覆盖整段 (假设翻译时已含子段翻译).
     all_hits.sort(key=lambda h: h[0])
     risk_d = 0
     conflicts = []

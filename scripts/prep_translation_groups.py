@@ -1,6 +1,6 @@
 """
 合并多个 extract 报告的 untranslated_prompt 候选, 按目标分组数平均切, 输出 N 个
-JSON 文件供并行翻译 subagent 使用.
+JSON 文件供并行翻译流程使用.
 
 用法:
   python3 prep_translation_groups.py <报告1.json> [<报告2.json> ...]
@@ -83,7 +83,7 @@ def write_info_mode(entries: list[dict], out_dir: Path, n_groups: int) -> None:
 
 def write_ready_mode(entries: list[dict], out_prefix: Path, n_groups: int) -> None:
     """ready 模式: 直接写 ready-to-translate 文件 (dict src -> "__TODO__"),
-    cc-l10n loader 兼容. 翻译 subagent 只需 Edit 替换 __TODO__."""
+    cc-l10n loader 兼容. 翻译时只需 Edit 替换 __TODO__."""
     groups: list[list[dict]] = [[] for _ in range(n_groups)]
     for i, e in enumerate(entries):
         groups[i % n_groups].append(e)
@@ -94,7 +94,7 @@ def write_ready_mode(entries: list[dict], out_prefix: Path, n_groups: int) -> No
         out_path = out_prefix.with_name(out_prefix.name + suffix + ".json")
         doc: dict = {"_meta": {"todo_marker": "__TODO__",
                                "entries": len(g),
-                               "note": "subagent 把每个 __TODO__ 替换为中文翻译"}}
+                               "note": "把每个 __TODO__ 替换为中文翻译"}}
         for e in g:
             doc[e["src"]] = "__TODO__"
         out_path.write_text(json.dumps(doc, ensure_ascii=False, indent=2))
@@ -114,7 +114,7 @@ def main() -> int:
                     help="default 模式输出目录 (默认 /tmp/cc-l10n-groups)")
     ap.add_argument("--ready", action="store_true",
                     help="ready 模式: 直接写 data/translations 兼容文件 (dict src->__TODO__), "
-                         "subagent 极简任务只需替换 __TODO__")
+                         "极简任务只需替换 __TODO__")
     ap.add_argument("--out-prefix", type=Path, default=None,
                     help="ready 模式输出文件名前缀 (e.g. data/translations/18_group_1), "
                          "自动加 a/b/c.json 后缀")
@@ -141,7 +141,7 @@ def main() -> int:
     if args.ready:
         if not args.out_prefix:
             ap.error("--ready 模式必须指定 --out-prefix")
-        log.info(f"ready 模式 → {args.out_prefix}<a/b/...>.json (subagent 替换 __TODO__):")
+        log.info(f"ready 模式 → {args.out_prefix}<a/b/...>.json (替换 __TODO__):")
         write_ready_mode(entries, args.out_prefix, args.groups)
     else:
         log.info(f"分 {args.groups} 组 (default info 模式):")
