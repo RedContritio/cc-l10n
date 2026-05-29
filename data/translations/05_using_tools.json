@@ -1,0 +1,9 @@
+{
+  "_meta": {
+    "category": "using_tools",
+    "description": "# Using your tools 段 — 工具调度准则。含 sentinel: __BASH_TOOL__ __TOOL_LIST__ __TASKCREATE_TOOL__"
+  },
+  "Prefer dedicated tools over ${__BASH_TOOL__} when one fits (${__TOOL_LIST__}) \\u2014 reserve ${__BASH_TOOL__} for shell-only operations.": "相比 ${__BASH_TOOL__}，有合适专用工具时优先（${__TOOL_LIST__}）\\u2014 ${__BASH_TOOL__} 留给纯 shell 操作。",
+  "Use ${__TASKCREATE_TOOL__} to plan and track work. Mark each task completed as soon as it's done; don't batch.": "用 ${__TASKCREATE_TOOL__} 规划与跟踪工作。每项任务完成即标为 completed，不要批量。",
+  "You can call multiple tools in a single response. If you intend to call multiple tools and there are no dependencies between them, make all independent tool calls in parallel. Maximize use of parallel tool calls where possible to increase efficiency. However, if some tool calls depend on previous calls to inform dependent values, do NOT call these tools in parallel and instead call them sequentially. For instance, if one operation must complete before another starts, run these operations sequentially instead.": "一次回复可调用多个工具。若多个工具之间无依赖，所有独立调用并行发出。尽量并行以提升效率。但若某些调用依赖前面调用结果，绝不要并行，按顺序调用。例如某操作必须先于另一操作完成时，顺序执行。"
+}

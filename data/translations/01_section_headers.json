@@ -1,0 +1,15 @@
+{
+  "_meta": {
+    "category": "section_headers",
+    "description": "Markdown 标题 — 主 system prompt 的章节分隔"
+  },
+  "# System": "# 系统",
+  "# Doing tasks": "# 执行任务",
+  "# Using your tools": "# 使用工具",
+  "# Tone and style": "# 语气与风格",
+  "# Session-specific guidance": "# 会话级指引",
+  "# Executing actions with care\n\n": "# 谨慎执行操作\n\n",
+  "# Text output (does not apply to tool calls)\n": "# 文本输出（不适用于工具调用）\n",
+  "# Environment": "# 环境",
+  "# Context management\n": "# 上下文管理\n"
+}

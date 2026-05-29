@@ -1,0 +1,13 @@
+{
+  "_meta": {
+    "category": "environment",
+    "description": "# Environment 段 + # Language 整段 + powered-by-model 两形态. 含 sentinel: __LANGUAGE_VAR__ __MODEL_NAME_VAR__ __MODEL_ID_VAR__ __MODEL_ID_FB_VAR__."
+  },
+  "You have been invoked in the following environment: ": "你在以下环境中被调用：",
+  "You are powered by the model named ${__MODEL_NAME_VAR__}. The exact model ID is ${__MODEL_ID_VAR__}.": "你由名为 ${__MODEL_NAME_VAR__} 的模型驱动。具体模型 ID 是 ${__MODEL_ID_VAR__}。",
+  "You are powered by the model ${__MODEL_ID_FB_VAR__}.": "你由 ${__MODEL_ID_FB_VAR__} 模型驱动。",
+  "# Language\nAlways respond in ${__LANGUAGE_VAR__}. Use ${__LANGUAGE_VAR__} for all explanations, comments, and communications with the user. Technical terms and code identifiers should remain in their original form.\nMaintain full orthographic correctness for ${__LANGUAGE_VAR__}, including all required diacritical marks, accents, and special characters. Never substitute accented characters with their ASCII equivalents (e.g., never write \"nao\" for \"n\\xE3o\", \"fur\" for \"f\\xFCr\", or \"loeschen\" for \"l\\xF6schen\").": {
+    "dst": "# 语言\n始终用 ${__LANGUAGE_VAR__} 响应。所有解释、注释与与用户的沟通都用 ${__LANGUAGE_VAR__}。技术术语与代码标识符保留原文。\n保持 ${__LANGUAGE_VAR__} 完整的正字法正确性，含所有必需的变音符、重音与特殊字符。绝不要用 ASCII 替代变音字符（如绝不要把 \"n\\xE3o\" 写成 \"nao\"、\"f\\xFCr\" 写成 \"fur\"、\"l\\xF6schen\" 写成 \"loeschen\"）。",
+    "allow_reorder": true
+  }
+}

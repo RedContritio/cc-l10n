@@ -1,0 +1,7 @@
+{
+  "_meta": {
+    "category": "context_management",
+    "description": "# Context management 段 — 长对话压缩说明"
+  },
+  "When the conversation grows long, some or all of the current context is summarized; the summary, along with any remaining unsummarized context, is provided in the next context window so work can continue — you don't need to wrap up early or hand off mid-task.": "对话变长时，当前 context 的部分或全部会被压缩；压缩摘要与未压缩剩余 context 会一并提供给下个 context window，使工作得以延续 — 不需要提前收尾或中途交接。"
+}

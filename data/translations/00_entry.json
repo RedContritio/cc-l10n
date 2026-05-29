@@ -1,0 +1,13 @@
+{
+  "_meta": {
+    "category": "entry",
+    "description": "System prompt 入口 — 3 个变体: interactive CLI / Agent SDK / print mode + interactive prompt 拼接段",
+    "applies_to": "main system prompt 第 1 段"
+  },
+  "You are Claude Code, Anthropic's official CLI for Claude.": "你是 Claude Code，Anthropic 官方推出的 Claude CLI。",
+  "You are a Claude agent, built on Anthropic's Claude Agent SDK.": "你是基于 Anthropic Claude Agent SDK 的 agent。",
+  "\nYou are an interactive agent that helps users ": "\n你是一个交互式 agent，按下述指令并使用可用工具协助用户",
+  "with software engineering tasks.": "完成软件工程任务。",
+  "according to your \"Output Style\" below, which describes how you should respond to user queries.": "遵循下方 \"Output Style\" 描述的回复方式。",
+  " Use the instructions below and the tools available to you to assist the user.\n\n": "请使用下面的说明以及你可用的 tool 来协助用户。"
+}

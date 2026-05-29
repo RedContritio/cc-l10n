@@ -1,0 +1,55 @@
+name: integration-test
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      versions:
+        description: '逗号分隔版本号 (空=dist-tags latest+stable)'
+        required: false
+        default: ''
+      all_versions:
+        description: '跑 npm 上全部版本 (覆盖 versions 输入)'
+        required: false
+        default: 'false'
+
+# 简化版: 单 job, 一个进程内跑 latest+stable × 三平台 (linux/win/mac)。
+# 平台子包仅 2.1.110+ 才有, 缺失组合走 404-skip。
+# 覆盖率 (verify untranslated_prompt=0) 是硬门; 聚合 no-stale 暂仅信息提示
+# (译文集版本范围未定; 待定后给手动 dispatch 或主 push 加 --check-stale)。
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - id: resolve
+        name: 解析目标版本
+        run: |
+          if [ "${{ inputs.all_versions }}" = "true" ]; then
+            mode="--all"
+          elif [ -n "${{ inputs.versions }}" ]; then
+            mode="--versions-csv ${{ inputs.versions }}"
+          else
+            mode="--dist-tags"
+          fi
+          echo "mode=$mode" >> $GITHUB_OUTPUT
+          vers=$(python3 scripts/integration_test.py $mode --list | tr '\n' '-')
+          echo "vers=$vers" >> $GITHUB_OUTPUT
+          echo "目标版本: $vers (mode=$mode)"
+
+      - name: 缓存 CC binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/cc-l10n/integration
+          key: cc-bins-${{ steps.resolve.outputs.vers }}
+
+      - name: 跑集成测试 (${{ steps.resolve.outputs.mode }} × 三平台)
+        run: python3 scripts/integration_test.py ${{ steps.resolve.outputs.mode }}

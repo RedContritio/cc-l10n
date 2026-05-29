@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+
+# 运行时 dump 出来的 cli.js / cli.js 拆分 / 临时分析输出
+decompiled/
+extracted/
+subagent_prompts/
+
+# 用户配置
+.claude/
+
+# macOS
+.DS_Store
+
+# binary 类 (不应提交)
+*.exe
+*.node
+*-zh
+*.orig
+*.bak
+
+# 临时报告
+/tmp/
+cc-zh-reports/
+.cache/
+
+# 历史 / 调试输出
+_probe_*.py
+*.report.json
+
+# 一次性诊断脚本归档 (本地保留, 不入 git; 见 scripts/diagnostic/README.md)
+scripts/diagnostic/

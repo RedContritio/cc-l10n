@@ -1,0 +1,12 @@
+{
+  "_meta": {
+    "category": "memory_examples",
+    "description": "memory 段中的 user/assistant 对话例子"
+  },
+  "    user: stop summarizing what you just did at the end of every response, I can read the diff": "    user: 不要在每次回复末尾总结你刚做了什么，我能读 diff",
+  "    assistant: [saves private feedback memory: this user wants terse responses with no trailing summaries. Private because it's a communication preference, not a project convention]": "    assistant: [保存 private feedback memory: 该用户希望回复简短、无末尾总结。private 是因为这是沟通偏好，不是项目约定]",
+  "    user: yeah the single bundled PR was the right call here, splitting this one would've just been churn": "    user: 是的，把这些合成一个 PR 是这里的正确选择，拆开反而只会徒增无谓的反复改动",
+  "    assistant: [saves private feedback memory: for refactors in this area, user prefers one bundled PR over many small ones. Confirmed after I chose this approach — a validated judgment call, not a correction]": "    assistant: [保存 private feedback memory: 该区域重构时，用户偏好单个打包 PR 而非多个小 PR。在我选了这条路径后被确认 \\u2014 这是经过验证的判断，不是纠正]",
+  "    user: the Grafana board at grafana.internal/d/api-latency is what oncall watches — if you're touching request handling, that's the thing that'll page someone": "    user: grafana.internal/d/api-latency 这个 Grafana 看板是 oncall 在看的 \\u2014 改请求处理代码时，那是会触发 page 的东西",
+  "    assistant: [saves team reference memory: grafana.internal/d/api-latency is the oncall latency dashboard — check it when editing request-path code]": "    assistant: [保存 team reference memory: grafana.internal/d/api-latency 是 oncall 延迟看板 \\u2014 改 request-path 代码时检查]"
+}

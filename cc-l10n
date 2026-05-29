@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# cc-l10n - Claude Code 系统提示词中文化 patch 工具.
+#
+# 本 bash wrapper 仅转发到 Python 跨平台入口 cc_l10n.py.
+# Windows 用户用 cc-l10n.cmd. 命令与参数完全一致.
+
+set -euo pipefail
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)"
+exec python3 "$SCRIPT_DIR/cc_l10n.py" "$@"
