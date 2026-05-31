@@ -17,6 +17,7 @@ Universal repack: 支持 macOS Mach-O 与 Linux ELF Bun standalone binary。
 import bisect
 import json
 import re
+import shutil
 import struct
 import subprocess
 import sys
@@ -723,12 +724,17 @@ def repack(input_bin: Path, output_bin: Path,
     Path(output_bin).write_bytes(new_binary)
     log.info(f"已写出 {output_bin} ({len(new_binary):,} 字节)")
 
-    # codesign for macOS
-    if fmt == "macho" and codesign:
+    # codesign for macOS: 仅在 codesign 可用时执行。codesign 是 macOS 专有工具,
+    # 非 macOS 的 CI runner (ubuntu) 上没有它; CI 只静态 verify 覆盖率、不运行 binary,
+    # 跳过签名无妨 (patched Mach-O 仍需在 macOS 上自行重签才能运行)。
+    if fmt == "macho" and codesign and shutil.which("codesign"):
         subprocess.run(["codesign", "--force", "--deep", "--sign", "-",
                         str(output_bin)], check=True)
         log.info(f"已 ad-hoc 签名")
     else:
+        if fmt == "macho" and codesign:
+            log.warning("codesign 不可用 (非 macOS), 跳过 ad-hoc 签名; "
+                        "patched Mach-O 需在 macOS 上重签才能运行")
         # 确保可执行
         Path(output_bin).chmod(0o755)
 
