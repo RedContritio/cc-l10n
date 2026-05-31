@@ -1,0 +1,3 @@
+{
+  "Send a message the user will read verbatim. Use this for content they need to see exactly as written between tool calls — a generated code snippet, a specific value, a direct reply to something they asked mid-task. Don't use it for routine narration of what you're about to do, or for your final answer — normal text reaches them for those.\n\n`status`: 'normal' when replying to what they just asked; 'proactive' when you're surfacing something unprompted.": "发送一条用户会逐字读到的消息。用于那些需要原样呈现的内容——工具调用之间的一段生成代码、一个具体的值、对用户在任务中途某个提问的直接回复。不要用它来例行叙述你接下来要做什么,也不要用于你的最终回答——那些场景用普通文本即可送达。\n\n`status`: 回复用户刚问的内容时用 'normal';主动抛出未经询问的内容时用 'proactive'。"
+}
