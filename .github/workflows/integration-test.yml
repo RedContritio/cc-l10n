@@ -2,7 +2,7 @@ name: integration-test
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   workflow_dispatch:
     inputs:
       versions:
