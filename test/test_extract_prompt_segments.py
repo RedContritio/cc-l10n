@@ -67,6 +67,31 @@ class TestScoreText(unittest.TestCase):
         self.assertTrue(any("js_code" in e for e in ev), f"应触发 js_code penalty, evidence={ev}")
         self.assertLess(score, 5)
 
+    def test_prose_structure_boost(self):
+        # 长散文 prompt: 无 markdown 标题 / "You are" / IMPORTANT: 等强信号, 仅靠
+        # 句子标点密度 (逗号/句号/分号后接空白) 判为 prompt (score>=5)。
+        # 这正是 weak(score=4)->prompt 漏译根因的修复: 缺强信号的主 system prompt
+        # 行为指令散文以前停在 4 分, 落入 class=weak 而静默漏译。
+        text = ("For actions that are hard to reverse or outward-facing, confirm first "
+                "unless durably authorized or explicitly told to proceed without asking; "
+                "approval in one context doesn't extend to the next. Report outcomes "
+                "faithfully: if tests fail, say so with the output; if a step was skipped, "
+                "say that.")
+        score, ev = score_text(text)
+        self.assertGreaterEqual(score, 5, f"长散文应判为 prompt, 实际 {score}, ev={ev}")
+        self.assertIn("prose_structure", ev)
+
+    def test_keyword_table_no_prose_boost(self):
+        # 语言关键字表: 长 + 含 if/else/for/in 等 stop_words, 但无句子标点 (空格分隔的
+        # token 流)。句子标点密度把它与散文 prompt 区分开 — 不触发 prose_structure,
+        # 不进入 prompt class (score<5)。避免把 CC 打包的 syntax-highlight 语言表误判。
+        text = ("int float string vector matrix if else switch case default while do "
+                "for in break continue global proc return array struct enum union typedef "
+                "const static void char short long double signed unsigned register extern")
+        score, ev = score_text(text)
+        self.assertNotIn("prose_structure", ev, f"关键字表不应判为散文, ev={ev}")
+        self.assertLess(score, 5, f"关键字表不应进入 prompt class, 实际 {score}, ev={ev}")
+
 
 class TestLoadWhitelist(unittest.TestCase):
     def test_filters_comment_keys(self):

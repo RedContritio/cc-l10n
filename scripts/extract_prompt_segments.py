@@ -63,6 +63,9 @@ STOP_WORDS = {
 }
 WORD_RE = re.compile(r"[A-Za-z']{2,}")
 SENTINEL_RE = re.compile(r"\$\{[\w.]+\}")
+# 句子标点 (句号/逗号/分号/冒号 后接空白或右括号): 散文有句子结构, 语言关键字表/
+# SYSRES 常量表/base64/正则 pattern 是无标点 token 流 -> 句子标点密度是强区分特征。
+SENT_PUNCT_RE = re.compile(r"[.,;:][ \n)]")
 URL_RE = re.compile(r"^https?://[\S]+$")
 PATH_RE = re.compile(r"^/?[A-Za-z0-9_\-./]+\.(?:ts|tsx|js|jsx|py|md|json|sh|toml)$")
 IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -145,6 +148,18 @@ def score_text(text: str) -> tuple[int, list[str]]:
             and not MD_HEADING_RE.search(text)):
         score += 3
         evidence.append("desc_verb_lead")
+
+    # 散文结构启发式: 长文本 + stop_words 密集 + 句子标点密集 = 自然语言散文 prompt。
+    # 主 system prompt 行为指令 / 各场景 prompt / tool·setting·agent 描述这类散文常
+    # 缺 markdown 标题 / "You are" / IMPORTANT: 等强信号, 仅靠 stop_words+长度 停在 4 分
+    # (< prompt 阈值 5), 导致 class=weak 静默漏译。句子标点密度把它们与语言关键字表 /
+    # SYSRES 常量 / base64 / 正则等无标点 token 流区分开 (后者密度 ~0)。
+    sentence_punct = len(SENT_PUNCT_RE.findall(text))
+    prose_density = sentence_punct / max(len(words), 1)
+    if (n >= 160 and stop_count >= 8
+            and sentence_punct >= 6 and prose_density >= 0.045):
+        score += 2
+        evidence.append("prose_structure")
 
     # 排除明显不是 prompt 的形态
     stripped = text.strip()
