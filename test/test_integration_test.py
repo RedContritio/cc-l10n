@@ -21,18 +21,18 @@ from integration_test import resolve_supported, compute_stale  # noqa: E402
 
 
 class TestResolveSupported(unittest.TestCase):
-    def test_csv_explicit(self):
-        s = resolve_supported("2.1.150, 2.1.160 ,2.1.158")
+    def test_csv_explicit_overrides_run_set(self):
+        # 显式 CSV 收窄/指定判定范围, 无视运行集
+        s = resolve_supported("2.1.150, 2.1.160 ,2.1.158", ["2.1.160"])
         self.assertEqual(s, {"2.1.150", "2.1.160", "2.1.158"})
 
-    def test_default_uses_dist_tags(self):
-        # 无 CSV -> 调 dist_tags_fn (此处 stub, 不碰网络)
-        s = resolve_supported(None, dist_tags_fn=lambda: ["2.1.150", "2.1.160"])
-        self.assertEqual(s, {"2.1.150", "2.1.160"})
+    def test_default_is_run_versions(self):
+        # 无 CSV -> 默认取本次运行的版本集 (跨整个运行集判 stale)
+        s = resolve_supported(None, ["2.1.150", "2.1.156", "2.1.160"])
+        self.assertEqual(s, {"2.1.150", "2.1.156", "2.1.160"})
 
-    def test_empty_csv_falls_back(self):
-        # 空串视为未指定? 实现: 空 CSV -> {} (split 出空). 契约: 空串不当默认。
-        s = resolve_supported("", dist_tags_fn=lambda: ["2.1.160"])
+    def test_empty_csv_falls_back_to_run_set(self):
+        s = resolve_supported("", ["2.1.160"])
         self.assertEqual(s, {"2.1.160"})
 
 

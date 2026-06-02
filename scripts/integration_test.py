@@ -220,15 +220,20 @@ def collect_matched(binary: Path, trans_keys: set[str], wl_srcs: list[str],
 
 
 def resolve_supported(supported_csv: str | None,
-                      dist_tags_fn=dist_tag_versions) -> set[str]:
-    """译文集官方支持的版本范围。
+                      default_versions: list[str]) -> set[str]:
+    """译文集官方支持的版本范围 (--check-stale 据此判真 stale)。
 
-    --supported-versions CSV 显式指定; 否则默认 npm dist-tags (latest+stable) 并集。
-    译文集是跨版本并集 —— 真死译文 = 不命中任何【受支持】版本的条目 (而非不命中抽样集)。
+    --supported-versions CSV 显式指定; 否则默认 = 本次运行的版本集 (default_versions)。
+
+    为何默认取运行集而非 dist-tags: 译文集是跨版本并集, 含为 latest/stable 之外的
+    维护变体 (实测补过 2.1.150/158/159 等)。若把 supported 钉死在窄窄两个 dist-tag,
+    那些维护变体会被误判真 stale。正解是【跑足够广的集合 (--all / 抽样) 并对运行集判
+    stale】: 跨整个运行集都不命中的条目才是真死译文。窄运行集 (如 --dist-tags) 不应开
+    --check-stale (会误杀维护变体); 想显式收窄判定范围时用 --supported-versions。
     """
     if supported_csv:
         return {v.strip() for v in supported_csv.split(",") if v.strip()}
-    return set(dist_tags_fn())
+    return set(default_versions)
 
 
 def compute_stale(all_trans_keys: set[str], wl_srcs: list[str],
@@ -304,7 +309,7 @@ def main() -> int:
     # supported 版本的命中, 故 stale = 跨所有受支持版本都不命中 = 真死译文。
     supported: set[str] = set()
     if args.check_stale:
-        supported = resolve_supported(args.supported_versions)
+        supported = resolve_supported(args.supported_versions, versions)
         log.info(f"--check-stale: 受支持版本范围 = {sorted(supported, key=parse_version)}")
         missing = supported - set(versions)
         if missing:
