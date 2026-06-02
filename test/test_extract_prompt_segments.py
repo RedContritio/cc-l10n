@@ -81,6 +81,28 @@ class TestScoreText(unittest.TestCase):
         self.assertGreaterEqual(score, 5, f"长散文应判为 prompt, 实际 {score}, ev={ev}")
         self.assertIn("prose_structure", ev)
 
+    def test_minified_js_penalty_kills_residue(self):
+        # 含 >=3 个 minified-JS runtime token 的残片 -> minified_js penalty -8, 不进 prompt class
+        text = '})}catch(H){N(`error ${H}`,{reason:`failed`}),H.push(_)'
+        score, ev = score_text(text)
+        self.assertTrue(any(e.startswith("minified_js") for e in ev), f"应触发 minified_js, ev={ev}")
+        self.assertLess(score, 5, f"JS 残片不应进入 prompt class, score={score}")
+
+    def test_minified_js_lead_punct(self):
+        # 续接标点开头 + 1 个 runtime token + 非 imperative -> 触发
+        text = '}),content:`some trailing minified fragment here`'
+        score, ev = score_text(text)
+        self.assertTrue(any(e.startswith("minified_js") for e in ev), f"ev={ev}")
+
+    def test_minified_js_no_false_positive_on_prompt(self):
+        # 真散文 prompt 不以续接标点开头、不含 3 个 runtime token -> 不应被 minified_js penalty
+        text = ("You are an interactive agent that helps the user with software "
+                "engineering tasks. Always confirm before destructive actions.")
+        score, ev = score_text(text)
+        self.assertFalse(any(e.startswith("minified_js") for e in ev),
+                         f"真 prompt 不应触发 minified_js, ev={ev}")
+        self.assertGreaterEqual(score, 5, f"真 prompt 应仍 >=5, score={score}")
+
     def test_keyword_table_no_prose_boost(self):
         # 语言关键字表: 长 + 含 if/else/for/in 等 stop_words, 但无句子标点 (空格分隔的
         # token 流)。句子标点密度把它与散文 prompt 区分开 — 不触发 prose_structure,

@@ -71,6 +71,23 @@ PATH_RE = re.compile(r"^/?[A-Za-z0-9_\-./]+\.(?:ts|tsx|js|jsx|py|md|json|sh|toml
 IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 CMD_RE = re.compile(r"^[a-z][a-z0-9\-]*(?: [a-z0-9\-./]+)*$")
 
+# minified-JS 残片 token (零误伤版, 见 scripts/diagnostic/test_minijs_penalty.py):
+# 真 prompt 不可能含 >=3 个这类 runtime token, 也不会以续接标点开头。
+MINI_JS_TOKENS = (
+    "N(`", "})}", "}),", ":!0", ":!1", "void 0", ".then(", ".push(", ".has(",
+    "catch(", "try{", "finally{", ",content:`", ",error:`", ",note:`",
+    ",reason:`", ",request_id:", ":return`", "Date.now()", "Array.isArray",
+    ".uuid", "){let ", "){if(", "];if(", ");if(", ")}if(", "})),", "=>{", "=>(",
+    ",identity:", ",properties:", ",profiles:", ",subtitle:", ",tool_use_id:",
+    ",source:", ",worktree:", ",attempts:", ",dryRun:", ",maxResultSizeChars",
+    "QBH()", "].push(", ",{cwd:", ".rm(", ".unlink(", ".dispose()",
+    ",instructions:[", ",command:", ",errorDescription:", ".at(-1)",
+    ".number()", ".optional()", ".min(", ".format()", "}:{error:", ",K6=",
+    "=ZH(", ",_)(", "?`${", ".apiBaseUrl", ".pluginId", ",changed_files:",
+    "=O.", ".whats_work", "this.version", "this.format",
+)
+MINI_JS_LEAD = set("&),;?:]}")
+
 
 def score_text(text: str) -> tuple[int, list[str]]:
     """给一段文本打 prompt-likelihood 分数, 返回 (score, evidence_tags)."""
@@ -208,6 +225,17 @@ def score_text(text: str) -> tuple[int, list[str]]:
                     stripped):
             evidence.append("js_punct_lead")
             score -= 5
+
+    # minified-JS 残片 penalty (零误伤版, 见 scripts/diagnostic/test_minijs_penalty.py):
+    # mj>=3 (prompt 不可能含 3 个 runtime token) 或 (续接标点开头 且 mj>=1 且非 imperative
+    # 指令)。补 js_markers/js_punct_lead 之外的细碎 minified token (`})}` / `,reason:` /
+    # `.then(` 等), 收掉残存 score>=5 的 JS 假候选。对真散文 prompt 结构安全 (不以 &),;?:]}
+    # 开头, 不含 3 个 runtime token)。
+    mj = sum(1 for p in MINI_JS_TOKENS if p in text)
+    mj_lead = bool(stripped) and stripped[0] in MINI_JS_LEAD
+    if mj >= 3 or (mj_lead and mj >= 1 and "imperative_marker" not in evidence):
+        evidence.append(f"minified_js={mj}")
+        score -= 8
 
     # 第三方 SDK runtime 字符串 (Azure / AWS / OAuth 错误等)
     sdk_markers = sum(1 for pat in [
