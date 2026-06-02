@@ -35,7 +35,30 @@ from log_setup import setup_logging
 log = setup_logging(__name__)
 
 
+def _walk_schema_descriptions(node, path: str):
+    """递归 yield (label, text): JSON Schema 树中所有非空 description 字符串字段.
+
+    input_schema 里的 description 同样发给模型 (字段级说明), 不限于 properties
+    一层 —— 递归 DFS 覆盖 items / nested object / oneOf 等任意深度, 避免漏扫。
+    """
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if k == "description" and isinstance(v, str):
+                if v.strip():
+                    yield (f"{path}.description", v)
+            else:
+                yield from _walk_schema_descriptions(v, f"{path}.{k}")
+    elif isinstance(node, list):
+        for idx, item in enumerate(node):
+            yield from _walk_schema_descriptions(item, f"{path}[{idx}]")
+
+
 def extract_all_prompts(jsonl_path: Path) -> list[tuple[str, str]]:
+    """提取实际发往 LLM 的全部英文承载文本: system[] + tools[] 描述 + input_schema descriptions.
+
+    tools[].description 与 input_schema 内的 description 字段是常驻工具集的一部分,
+    随每个请求发给模型 —— ground-truth 必须覆盖它们, 不受 binary 内如何存储/切碎/拼装影响。
+    """
     out = []
     for line_no, line in enumerate(jsonl_path.read_text().splitlines(), 1):
         rec = json.loads(line)
@@ -47,6 +70,18 @@ def extract_all_prompts(jsonl_path: Path) -> list[tuple[str, str]]:
             t = s.get("text", "")
             if t:
                 out.append((f"rec{line_no}.sys[{i}]", t))
+        for ti, tool in enumerate(body.get("tools", [])):
+            if not isinstance(tool, dict):
+                continue
+            name = tool.get("name", f"#{ti}")
+            desc = tool.get("description", "")
+            if isinstance(desc, str) and desc.strip():
+                out.append((f"rec{line_no}.tool[{name}].description", desc))
+            schema = tool.get("input_schema")
+            if isinstance(schema, dict):
+                yield_from = _walk_schema_descriptions(
+                    schema, f"rec{line_no}.tool[{name}].input_schema")
+                out.extend(yield_from)
     return out
 
 
