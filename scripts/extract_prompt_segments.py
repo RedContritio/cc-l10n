@@ -329,6 +329,37 @@ def collect_array_groups(cli: bytes, ranges: list[tuple[int, int, str]]) -> dict
     return out
 
 
+def collect_template_groups(cli: bytes,
+                            ranges: list[tuple[int, int, str]]) -> dict[int, int]:
+    """识别同一 template literal 的相邻 tmpl_frag (间隔恰为一段 ${...} 插值).
+
+    scan_template 把 `A${x}B` 切成 tmpl_frag "A"/"B", 二者之间 cli[e1:s2] 正好是
+    `${...}` (以 ${ 开头, } 结尾, 中间无反引号 — 反引号意味着跨模板边界或嵌套模板)。
+    返回 dict: frag_offset -> root_index (同一模板的 frag 共享 root, union-find)。
+    """
+    n = len(ranges)
+    parent = list(range(n))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for i in range(n - 1):
+        s1, e1, t1 = ranges[i]
+        s2, e2, t2 = ranges[i + 1]
+        if t1 != "tmpl_frag" or t2 != "tmpl_frag":
+            continue
+        gap = cli[e1:s2]
+        if gap.startswith(b"${") and gap.endswith(b"}") and b"`" not in gap:
+            ri, rj = find(i), find(i + 1)
+            if ri != rj:
+                parent[ri] = rj
+
+    return {ranges[i][0]: find(i) for i in range(n)}
+
+
 def classify_literal(text: str, offset: int, group_size: int,
                      min_score: int) -> tuple[str, int, list[str]]:
     """
@@ -450,6 +481,32 @@ def main():
     for gid in groups.values():
         group_sizes[gid] = group_sizes.get(gid, 0) + 1
 
+    # 3a 结构感知 (中英混合模板检测, 报告信号): 同一 template literal 的相邻 tmpl_frag,
+    # 若整组【同时含中文 frag 与英文实质 frag】= 很可能是正在被翻译但残留英文的描述/
+    # skill 文档 (项目要消灭的中英混合)。这是【报告/警告】信号, 不进 strict 硬门 ——
+    # 因为这类模板里残留的英文既有该译的散文, 也有该留英文的代码示例 (Promise.all() /
+    # JSON / shell), 无启发式可干净区分, 强制 gate 会逼着把代码也译/whitelist。
+    # 实测: 纯评分重组判据 flood 1813 假阳性 (全英文 HTML/shell/doc 模板), 故弃用;
+    # 限定到"含中文的混合模板"后降到 ~233, 但仍混代码碎片, 适合人工三审而非自动门。
+    log.info(f"识别 template literal 分组 (3a 中英混合检测) ...")
+    tmpl_groups = collect_template_groups(cli, ranges)
+    range_by_offset = {r[0]: r for r in ranges}
+    tmpl_members: dict[int, list[tuple[int, int, str]]] = {}
+    for off, root in tmpl_groups.items():
+        tmpl_members.setdefault(root, []).append(range_by_offset[off])
+    mixed_template_offsets: set[int] = set()
+    for root, members in tmpl_members.items():
+        if len(members) < 2:
+            continue
+        decoded = [(s, decode_literal(cli, s, e, lt)) for s, e, lt in members]
+        has_cn = any(t and CN_RE.search(t) for _, t in decoded)
+        if not has_cn:
+            continue  # 全英文模板 = 代码串, 不碰
+        for s, t in decoded:
+            if t and not CN_RE.search(t) and len(t.strip()) >= 8 and WORD_RE.search(t):
+                mixed_template_offsets.add(s)
+    log.info(f"  中英混合模板残留英文片段 (报告信号): {len(mixed_template_offsets)}")
+
     trans_keys: set[str] = set()
     if args.translations:
         trans_keys = load_translations_keys(Path(args.translations), platform)
@@ -473,7 +530,9 @@ def main():
         "whitelisted": 0,
         "untranslated_prompt": 0,
         "untranslated_weak": 0,
+        "mixed_lang_template_residual": 0,
     }
+    mixed_lang_samples: list[str] = []
 
     # 用于覆盖率: 把 trans_keys 转成 bytes 集合, 还要考虑 sentinel 形态
     # trans_keys 是原始 JSON key (含 ${__SENTINEL__}), 需要拿 cli 中真实变量名来 materialize
@@ -536,6 +595,8 @@ def main():
         gid = groups.get(start, f"g_solo_{start}")
         gsize = group_sizes.get(gid, 1)
         cls, score, ev = classify_literal(text, start, gsize, args.min_score)
+        if start in mixed_template_offsets:
+            ev.append("mixed_lang_template")
         if cls == "skip":
             stats["scored_skip"] += 1
             continue
@@ -578,6 +639,11 @@ def main():
                 stats["untranslated_prompt"] += 1
             else:
                 stats["untranslated_weak"] += 1
+            # 报告信号 (不进 strict 门): 中英混合模板里残留且未覆盖的英文实质片段
+            if start in mixed_template_offsets:
+                stats["mixed_lang_template_residual"] += 1
+                if len(mixed_lang_samples) < 40:
+                    mixed_lang_samples.append(text)
 
         entry = {
             "offset": start,
@@ -601,6 +667,7 @@ def main():
         "source": str(src_path),
         "cli_js_size": len(cli),
         "summary": stats,
+        "mixed_lang_template_samples": mixed_lang_samples,
         "candidates": candidates,
     }
 
@@ -611,6 +678,14 @@ def main():
     log.info(f"\n=== 摘要 ===")
     for k, v in stats.items():
         log.info(f"  {k:<28} {v:>6}")
+
+    # 报告信号 (warning, 不进 strict 门): 中英混合模板残留英文片段, 供人工三审
+    if stats["mixed_lang_template_residual"] > 0:
+        log.warning(f"\n[WARN] 中英混合模板残留英文片段: {stats['mixed_lang_template_residual']} "
+                    f"(报告信号, 不计入 strict; 需人工区分该译散文 vs 该留代码示例)")
+        for t in mixed_lang_samples[:min(args.show, len(mixed_lang_samples))]:
+            preview = t.strip()[:args.show_context].replace("\n", "\\n")
+            log.warning(f"    {preview!r}")
 
     # 打印未翻译的前 N 条
     untrans = [c for c in candidates

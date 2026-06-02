@@ -25,7 +25,10 @@ from pathlib import Path
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent / "scripts"
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-from extract_prompt_segments import score_text, load_whitelist, is_whitelisted  # noqa: E402
+from extract_prompt_segments import (  # noqa: E402
+    score_text, load_whitelist, is_whitelisted, collect_template_groups,
+)
+from js_string_scanner import scan_string_literals  # noqa: E402
 
 
 class TestScoreText(unittest.TestCase):
@@ -113,6 +116,35 @@ class TestScoreText(unittest.TestCase):
         score, ev = score_text(text)
         self.assertNotIn("prose_structure", ev, f"关键字表不应判为散文, ev={ev}")
         self.assertLess(score, 5, f"关键字表不应进入 prompt class, 实际 {score}, ev={ev}")
+
+
+class TestCollectTemplateGroups(unittest.TestCase):
+    """3a: 同一 template literal 的相邻 tmpl_frag 应归同组; 跨模板/数组不归组."""
+
+    def _groups(self, src: str):
+        cli = src.encode("utf-8")
+        ranges = list(scan_string_literals(cli))
+        groups = collect_template_groups(cli, ranges)
+        # 返回 {decoded_frag_text: root}, 仅 tmpl_frag
+        out = {}
+        for s, e, t in ranges:
+            if t == "tmpl_frag":
+                out[cli[s:e].decode("utf-8")] = groups[s]
+        return out
+
+    def test_same_template_grouped(self):
+        # `Frag one ${a} frag two ${b} end` -> 3 个 tmpl_frag 同 root
+        g = self._groups("x=`Frag one ${a} frag two ${b} end`;")
+        frags = [k for k in g if k.strip()]
+        self.assertEqual(len(frags), 3, f"应有 3 个 tmpl_frag, got {list(g)}")
+        roots = {g[k] for k in frags}
+        self.assertEqual(len(roots), 1, f"同模板 3 frag 应同 root, got {g}")
+
+    def test_separate_templates_not_grouped(self):
+        # 两个独立 template literal 之间夹 +x+ -> 不同 root
+        g = self._groups("a=`First part here`+x+`Second part here`;")
+        roots = {g[k] for k in g if k.strip()}
+        self.assertEqual(len(roots), 2, f"两独立模板应不同 root, got {g}")
 
 
 class TestLoadWhitelist(unittest.TestCase):
