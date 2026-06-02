@@ -115,6 +115,29 @@ class TestLoadWhitelist(unittest.TestCase):
         self.assertIn("Whole literal A", wl["literal_exact"])
         self.assertNotIn("_comment_lit_skip", wl["literal_exact"])
 
+    def test_padded_literal_exact_raises(self):
+        # 契约: literal_exact 条目带外层空白 (前/后导空白) = 静默死条目
+        # (is_whitelisted 用 strip 比较, 永不命中). load_whitelist 必须 raise.
+        for bad in ("  leading space", "trailing newline\n", "\n\nblock\n"):
+            with tempfile.TemporaryDirectory() as td:
+                wl_path = Path(td) / "wl.json"
+                wl_path.write_text(json.dumps({
+                    "literal_exact": ["Clean entry", bad],
+                }))
+                with self.assertRaises(ValueError):
+                    load_whitelist(wl_path)
+
+    def test_clean_literal_exact_loads(self):
+        # 已 strip 的条目正常加载, 不 raise
+        with tempfile.TemporaryDirectory() as td:
+            wl_path = Path(td) / "wl.json"
+            wl_path.write_text(json.dumps({
+                "literal_exact": ["Clean entry", "Another clean one"],
+            }))
+            wl = load_whitelist(wl_path)
+        self.assertIn("Clean entry", wl["literal_exact"])
+        self.assertIn("Another clean one", wl["literal_exact"])
+
 
 class TestIsWhitelisted(unittest.TestCase):
     def setUp(self):

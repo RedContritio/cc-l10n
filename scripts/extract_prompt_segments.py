@@ -342,15 +342,29 @@ def load_whitelist(path: Path) -> dict:
     """返回 dict: {exact, regex, literal_exact}.
 
     literal_exact 用 set + frozenset 加速完整字面量匹配.
+
+    契约: literal_exact 条目必须已 strip 存储. is_whitelisted 用
+    ``text.strip() in literal_exact`` 比较, 带外层空白 (前/后导 \\n / 空格)
+    的条目永远无法命中 = 静默死条目. 此处强制 raise 让缺陷可见, 不静默纠正
+    (auto-strip 会掩盖数据缺陷).
     """
     raw = json.loads(path.read_text())
+    literal_raw = [
+        s for s in raw.get("literal_exact", [])
+        if isinstance(s, str) and not s.startswith("_comment")
+    ]
+    padded = [s for s in literal_raw if s != s.strip()]
+    if padded:
+        sample = padded[0]
+        raise ValueError(
+            f"whitelist literal_exact 含 {len(padded)} 条带外层空白的死条目 "
+            f"(is_whitelisted 用 strip 比较, 永不命中): 首条 repr_head={sample[:40]!r}. "
+            f"请在 {path} 中 strip 这些条目后重试."
+        )
     return {
         "exact": [s for s in raw.get("exact", []) if isinstance(s, str) and not s.startswith("_comment")],
         "regex": [re.compile(p) for p in raw.get("regex", []) if not p.startswith("_comment")],
-        "literal_exact": frozenset(
-            s for s in raw.get("literal_exact", [])
-            if isinstance(s, str) and not s.startswith("_comment")
-        ),
+        "literal_exact": frozenset(literal_raw),
     }
 
 
