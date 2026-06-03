@@ -1,0 +1,5 @@
+{
+  "_comment": "CAPTURE 实测 item-1 漏译的工具主描述 (整条无中文): Glob/TaskStop (单一字面量, decode-match 落地)。CronDelete/CronList 是模板拼装 (binary 内 frag 切分, 捕获整串不匹配), 需 frag-src, 归剩余清单后补。src=binary 字面量逐字。",
+  "Fast file pattern matching. Supports glob patterns like \"**/*.js\" or \"src/**/*.ts\". Returns matching file paths sorted by modification time.": "快速文件模式匹配。支持 \"**/*.js\" 或 \"src/**/*.ts\" 这类 glob 模式。返回按修改时间排序的匹配文件路径。",
+  "\n- Stops a running background task by its ID\n- Takes a task_id parameter identifying the task to stop\n- Returns a success or failure status\n- Use this tool when you need to terminate a long-running task\n": "\n- 按 ID 停止一个运行中的后台任务\n- 接受一个 task_id 参数, 标识要停止的任务\n- 返回成功或失败状态\n- 当你需要终止一个长时间运行的任务时使用此工具\n"
+}
