@@ -86,6 +86,9 @@ MINI_JS_TOKENS = (
     "=ZH(", ",_)(", "?`${", ".apiBaseUrl", ".pluginId", ",changed_files:",
     "=O.", ".whats_work", "this.version", "this.format",
 )
+# 仅这 8 个【续接/闭合标点】作 lead 触发: 字面量以它们开头 = 极可能是 minified JS
+# 拼接残尾 (前一表达式的尾 + 本片段)。刻意【排除】 [ ( { . = 等: markdown 列表 "- "、
+# 括号引导、方法链说明、配置 "key = val" 都是合法 prompt 散文会以它们起首, 纳入会全面误伤。
 MINI_JS_LEAD = set("&),;?:]}")
 
 

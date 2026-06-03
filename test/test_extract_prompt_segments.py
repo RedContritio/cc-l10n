@@ -97,6 +97,15 @@ class TestScoreText(unittest.TestCase):
         score, ev = score_text(text)
         self.assertTrue(any(e.startswith("minified_js") for e in ev), f"ev={ev}")
 
+    def test_minified_js_lead_exempts_imperative(self):
+        # 续接标点开头 + mj>=1, 但含 imperative_marker (IMPORTANT: 等) -> 豁免, 不触发 penalty
+        # 防止以标点起首的强指令 prompt 被误降权
+        text = "}: IMPORTANT: never call .then( on this handle; await it instead for safety always."
+        score, ev = score_text(text)
+        self.assertIn("imperative_marker", ev)
+        self.assertFalse(any(e.startswith("minified_js") for e in ev),
+                         f"含 imperative 应豁免 minified_js, ev={ev}")
+
     def test_minified_js_no_false_positive_on_prompt(self):
         # 真散文 prompt 不以续接标点开头、不含 3 个 runtime token -> 不应被 minified_js penalty
         text = ("You are an interactive agent that helps the user with software "
