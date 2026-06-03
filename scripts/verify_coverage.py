@@ -53,6 +53,19 @@ def _walk_schema_descriptions(node, path: str):
             yield from _walk_schema_descriptions(item, f"{path}[{idx}]")
 
 
+# 动态注入、不在 CC binary、cc-l10n 物理上无法静态译的内容 (与 MCP 同理, FN 门范围外):
+#   namespaced 'plugin:agent:' / 'plugin:skill:' 注册行 —— Agent 工具描述与 available-skills
+#   列表里, 已装 plugin 的 agent/skill 由 harness 运行时动态列出, 描述非 cli.js 静态字面量,
+#   换 plugin/机器即变。builtin (单名, 如 '- claude:' / '- reconsider:') 不匹配, 仍在范围内。
+OOS_PLUGIN_LINE = re.compile(r"^[ \t]*[-*][ \t]+[a-z][\w\-]*:[\w\-]+:.*$", re.MULTILINE)
+
+
+def strip_oos(text: str) -> tuple[str, int]:
+    """剔除范围外的动态 plugin 注册行, 返回 (清理后文本, 剔除行数)。"""
+    n = len(OOS_PLUGIN_LINE.findall(text))
+    return (OOS_PLUGIN_LINE.sub("", text), n) if n else (text, 0)
+
+
 def extract_all_prompts(jsonl_path: Path) -> list[tuple[str, str]]:
     """提取实际发往 LLM 的全部英文承载文本: system[] + tools[] 描述 + input_schema descriptions.
 
@@ -99,20 +112,27 @@ def find_residual_tokens(text: str, wl: dict) -> list[str]:
     实现: 全文先减去 whitelist literal_exact / exact / regex 匹配, 再提取剩余
     3+ 字母英文 token. 用空格替换 (而非空串) 避免 "Claude Code" -> 减去
     "Claude" 后变 " Code" 仍触发, 减成空格后保留 token 边界.
+
+    顺序 literal_exact -> exact -> regex: literal_exact 先减保护代码示例块整体 (否则
+    word 级 exact / 结构 regex 会先打碎块, 令块的 literal_exact 失配)。env 标签:值 这类
+    被 exact 标签词打碎的少数情形, 用不依赖标签词的 regex (值位置) 兜。
     """
     if not text.strip():
         return []
 
     s = text
-    # 减去 literal_exact (整段完全匹配; 长度倒序以最长优先)
+    # 减去 literal_exact (整段完全匹配; 长度倒序以最长优先, 保护代码块)。
+    # literal_exact 是【特定长串】整体匹配 (代码块/多词示例), 非单词子串, 故仍用 substring。
     for item in sorted(wl.get("literal_exact", ()), key=len, reverse=True):
         if item and item in s:
             s = s.replace(item, " ")
-    # 减去 exact (子串匹配; 长度倒序避免短词截断长词)
+    # 减去 exact (**词边界匹配, 非子串** —— 用户铁律: 禁短词吃长词中段, 如 cat 吃 noti·cat·ion /
+    # any 吃 m·any / PR 吃 DE·PR·ECATED。两端须非字母才命中。长度倒序仍保留)。
     for item in sorted(wl.get("exact", []), key=len, reverse=True):
         if not item:
             continue
-        s = s.replace(item, " ")
+        # 仅当 item 两端字符均非 ASCII 字母时才算完整词命中
+        s = re.sub(r"(?<![A-Za-z])" + re.escape(item) + r"(?![A-Za-z])", " ", s)
     # 减去 regex
     for pat in wl.get("regex", []):
         s = pat.sub(" ", s)
@@ -223,10 +243,13 @@ def main():
     all_residual = []
     by_label = {}
     mcp_segs = 0
+    oos_lines = 0
     for label, text in prompts:
         if "mcp__" in label:
             mcp_segs += 1  # 范围外, 不查
             continue
+        text, n_oos = strip_oos(text)  # 剔除动态 plugin 注册行 (范围外, 同 MCP)
+        oos_lines += n_oos
         residuals = find_residual_tokens(text, wl)
         if residuals:
             by_label[label] = sorted(set(residuals))
@@ -235,6 +258,7 @@ def main():
     log.info(f"\n=== 摘要 ===")
     log.info(f"  总段数              : {len(prompts)}")
     log.info(f"  MCP 外部 (范围外)   : {mcp_segs}")
+    log.info(f"  plugin 注册行剔除   : {oos_lines} (动态, 范围外)")
     log.info(f"  含残留段 (非 MCP)   : {len(by_label)}")
     log.info(f"  残留 token 总数     : {len(all_residual)}")
     log.info(f"  唯一残留 token      : {len(set(all_residual))}")
