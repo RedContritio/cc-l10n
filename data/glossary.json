@@ -1,0 +1,30 @@
+{
+  "_comment": "术语一致性表 (用户铁律: 每个名词/动词译文固定子集; src 有该词 dst 须含集合元素或 keep)。词边界完整词匹配。phrase=多词术语优先于其中单词。这是 starter 集 (高置信), 由 glossary_check.py 校验; 持续扩充。见 memory feedback-translation-consistency / feedback-wl-word-boundary。",
+  "terms": {
+    "plan mode":   {"keep": true, "phrase": true},
+    "git worktree": {"keep": true, "phrase": true},
+    "task list":   {"zh": ["任务列表"], "phrase": true},
+    "todo list":   {"zh": ["todo 列表", "待办列表"], "phrase": true},
+
+    "worktree":    {"keep": true},
+    "workflow":    {"keep": true},
+    "subagent":    {"keep": true},
+    "pipeline":    {"keep": true},
+    "harness":     {"keep": true},
+    "transcript":  {"keep": true},
+    "stdout":      {"keep": true},
+    "stderr":      {"keep": true},
+    "schema":      {"keep": true},
+    "prompt":      {"keep": true},
+    "token":       {"keep": true},
+    "session":     {"keep": true},
+    "hook":        {"keep": true},
+    "cron":        {"keep": true},
+
+    "tool":        {"zh": ["工具"]},
+    "list":        {"zh": ["列表"]},
+    "instead":     {"zh": ["改用", "而非", "而不是", "取而代之"]},
+    "dump":        {"zh": ["转储"]},
+    "reattach":    {"zh": ["重新接入", "重新连接", "重新附加"]}
+  }
+}
