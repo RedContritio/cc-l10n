@@ -35,6 +35,12 @@ class TestResolveSupported(unittest.TestCase):
         s = resolve_supported("", ["2.1.160"])
         self.assertEqual(s, {"2.1.160"})
 
+    def test_whitespace_only_csv_falls_back(self):
+        # 仅空白/逗号的 CSV 不应返回空集 (空集会让全部条目判 stale), 应回退运行集
+        self.assertEqual(resolve_supported("   ", ["2.1.160"]), {"2.1.160"})
+        self.assertEqual(resolve_supported(" , , ", ["2.1.158", "2.1.160"]),
+                         {"2.1.158", "2.1.160"})
+
 
 class TestComputeStale(unittest.TestCase):
     def test_dead_item_surfaces(self):

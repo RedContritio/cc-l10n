@@ -232,7 +232,9 @@ def resolve_supported(supported_csv: str | None,
     --check-stale (会误杀维护变体); 想显式收窄判定范围时用 --supported-versions。
     """
     if supported_csv:
-        return {v.strip() for v in supported_csv.split(",") if v.strip()}
+        picked = {v.strip() for v in supported_csv.split(",") if v.strip()}
+        if picked:  # 仅空白/逗号的 CSV 视为未指定, 回退默认 (而非空集 → 全判 stale)
+            return picked
     return set(default_versions)
 
 
@@ -261,8 +263,8 @@ def main() -> int:
                     help="启用聚合 no-stale 失败门 (真 stale = 不命中任何受支持版本; "
                          "运行集会自动补齐 supported 以保证判定可靠)")
     ap.add_argument("--supported-versions", default=None,
-                    help="逗号分隔的官方支持版本范围 (默认 npm dist-tags latest+stable 并集); "
-                         "--check-stale 据此判真 stale")
+                    help="逗号分隔的官方支持版本范围 (默认 = 本次运行的版本集); "
+                         "--check-stale 据此判真 stale (窄运行集会误杀跨版本维护变体)")
     ap.add_argument("--current-minor-recent", type=int, default=5,
                     help="当前 minor 额外抽最近 N 个 patch (默认 5)")
     ap.add_argument("--list", action="store_true",
@@ -311,6 +313,11 @@ def main() -> int:
     if args.check_stale:
         supported = resolve_supported(args.supported_versions, versions)
         log.info(f"--check-stale: 受支持版本范围 = {sorted(supported, key=parse_version)}")
+        # 护栏: 窄运行集 (dist-tags/单版本) 且无显式 --supported-versions 时, supported
+        # 仅含那一两个版本, 跨版本维护变体会被误判 stale。提醒用户用抽样/--all 或显式指定。
+        if not args.supported_versions and len(supported) <= 2 and (args.dist_tags or args.version):
+            log.warning(f"[WARN] --check-stale 配窄运行集 (supported 仅 {len(supported)} 版): "
+                        f"跨版本维护变体可能被误判 stale。广覆盖请用抽样/--all, 或显式 --supported-versions。")
         missing = supported - set(versions)
         if missing:
             log.info(f"  运行集补齐 supported 缺失版本: {sorted(missing, key=parse_version)}")
@@ -333,6 +340,7 @@ def main() -> int:
     wl_srcs = [s for s in wl.get("literal_exact", ()) if s and not s.startswith("_comment")]
     matched: set[str] = set()
     all_trans_keys: set[str] = set()
+    collected_versions: set[str] = set()  # 实际成功 collect_matched 的版本 (≥1 平台)
 
     failed = []
     skipped = []
@@ -364,6 +372,7 @@ def main() -> int:
             if (not args.check_stale) or (v in supported):
                 try:
                     collect_matched(binary, plat_keys, wl_srcs, matched)
+                    collected_versions.add(v)
                 except Exception as e:
                     log.warning(f"[WARN] {label}: collect_matched 失败: {e}")
 
@@ -378,6 +387,15 @@ def main() -> int:
     if skipped:
         log.info(f"  skip: {skipped[:20]}")
     stale_fail = bool(stale) and args.check_stale
+    # 护栏: 若某受支持版本全平台都没能 collect (404/fetch 失败), matched 缺其贡献,
+    # 仅存于该版本的活译文会被误判 stale → 判定不可靠, 本次不作失败门 (只警告)。
+    if args.check_stale:
+        uncollected = supported - collected_versions
+        if uncollected:
+            log.warning(f"[WARN] {len(uncollected)} 个受支持版本全平台未能收集 (404/失败): "
+                        f"{sorted(uncollected, key=parse_version)}; matched 不完整, stale 判定不可靠, "
+                        f"本次不作失败门 (修复版本可用性后重判)")
+            stale_fail = False
     scope = (f"跨 {len(supported)} 个受支持版本" if args.check_stale else "全平台全抽样版本")
     log.info(f"聚合 no-stale: translation+whitelist 共 {len(all_trans_keys)+len(wl_srcs)} 条, "
              f"{scope}未命中 {len(stale)} 条"
