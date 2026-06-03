@@ -70,18 +70,21 @@ def extract_all_prompts(jsonl_path: Path) -> list[tuple[str, str]]:
             t = s.get("text", "")
             if t:
                 out.append((f"rec{line_no}.sys[{i}]", t))
-        for ti, tool in enumerate(body.get("tools", [])):
+        tools = body.get("tools", [])
+        if not isinstance(tools, list):
+            tools = []
+        for ti, tool in enumerate(tools):
             if not isinstance(tool, dict):
                 continue
-            name = tool.get("name", f"#{ti}")
+            name = tool.get("name", "?")
+            # 标签含工具下标 ti 保证唯一 (同名工具不会 label 碰撞导致 dict 丢值)
+            base = f"rec{line_no}.tool[{ti}:{name}]"
             desc = tool.get("description", "")
             if isinstance(desc, str) and desc.strip():
-                out.append((f"rec{line_no}.tool[{name}].description", desc))
+                out.append((f"{base}.description", desc))
             schema = tool.get("input_schema")
             if isinstance(schema, dict):
-                yield_from = _walk_schema_descriptions(
-                    schema, f"rec{line_no}.tool[{name}].input_schema")
-                out.extend(yield_from)
+                out.extend(_walk_schema_descriptions(schema, f"{base}.input_schema"))
     return out
 
 

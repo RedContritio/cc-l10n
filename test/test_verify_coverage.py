@@ -135,12 +135,34 @@ class TestExtractAllPrompts(unittest.TestCase):
         out = dict(extract_all_prompts(self._write_jsonl(body)))
         labels = set(out)
         self.assertIn("rec1.sys[0]", labels)
-        self.assertIn("rec1.tool[Bash].description", labels)
-        self.assertEqual(out["rec1.tool[Bash].description"], "Execute a bash command")
+        self.assertIn("rec1.tool[0:Bash].description", labels)
+        self.assertEqual(out["rec1.tool[0:Bash].description"], "Execute a bash command")
         # 嵌套 input_schema properties 的 description 也被提取
-        cmd_label = "rec1.tool[Bash].input_schema.properties.command.description"
+        cmd_label = "rec1.tool[0:Bash].input_schema.properties.command.description"
         self.assertIn(cmd_label, labels)
         self.assertEqual(out[cmd_label], "The command to run")
+
+    def test_duplicate_tool_names_no_label_collision(self):
+        # 两个同名工具: label 含下标 ti, 不碰撞 -> 两条描述都保留 (dict 不丢值)
+        body = {"tools": [
+            {"name": "Bash", "description": "First desc here"},
+            {"name": "Bash", "description": "Second desc here"},
+        ]}
+        out = dict(extract_all_prompts(self._write_jsonl(body)))
+        self.assertEqual(out.get("rec1.tool[0:Bash].description"), "First desc here")
+        self.assertEqual(out.get("rec1.tool[1:Bash].description"), "Second desc here")
+
+    def test_skips_malformed_tools_and_schema(self):
+        # tools 非 list / tool 非 dict / input_schema 非 dict / description 非 str -> 不崩, 安全跳过
+        for body in (
+            {"tools": {"name": "X", "description": "Run it"}},      # tools 是 dict
+            {"tools": "Run it"},                                     # tools 是 string
+            {"tools": ["notadict", 123, None]},                      # 元素非 dict
+            {"tools": [{"name": "T", "input_schema": "string"}]},    # schema 非 dict
+            {"tools": [{"name": "T", "input_schema": {"properties": {"x": {"description": 123}}}}]},  # desc 非 str
+        ):
+            out = extract_all_prompts(self._write_jsonl(body))
+            self.assertEqual(out, [], f"畸形输入应返回空, body={body}")
 
     def test_residual_found_in_tool_description(self):
         # 端到端: 未翻工具描述应被 find_residual_tokens 报残留

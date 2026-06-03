@@ -51,8 +51,9 @@ def wait_ready(port: int, timeout: float = 8.0) -> bool:
     while time.time() < deadline:
         try:
             urllib.request.urlopen(url, timeout=0.5)
+            return True  # 任何 2xx/3xx 响应 = server 已起
         except urllib.error.HTTPError:
-            return True  # 404 = server 已起 (do_GET 返回 404)
+            return True  # 4xx/5xx 同样是 server 已起 (mock do_GET 返回 404)
         except Exception:
             time.sleep(0.2)
     return False
