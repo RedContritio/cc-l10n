@@ -212,24 +212,32 @@ def main():
         log.info(f"\n[OK] STATIC strict pass")
         return
 
-    # CAPTURE 模式
+    # CAPTURE 模式: token 级 strict (对所有非 MCP 段, 含中文段一并查 —— 不接受
+    # "段含中文=整段跳过" 的容忍)。残留英文 token 必须【译掉】或【显式入白】(每个实例/术语
+    # 都是已知 whitelist 条目)。MCP 外部工具 (label 含 mcp__) 范围外: 描述由 MCP server
+    # 运行时注入, 不在 CC binary, cc-l10n 物理上无法翻译, 单列不计入 FN 门。
     prompts = extract_all_prompts(Path(args.captured))
-    log.info(f"=== CAPTURE strict 验证 ===")
-    log.info(f"提取 {len(prompts)} 段 system prompt")
+    log.info(f"=== CAPTURE strict 验证 (token 级, 含中文段一并查) ===")
+    log.info(f"提取 {len(prompts)} 段 (system + tools[] + input_schema descriptions)")
 
     all_residual = []
     by_label = {}
+    mcp_segs = 0
     for label, text in prompts:
+        if "mcp__" in label:
+            mcp_segs += 1  # 范围外, 不查
+            continue
         residuals = find_residual_tokens(text, wl)
         if residuals:
             by_label[label] = sorted(set(residuals))
             all_residual.extend(residuals)
 
     log.info(f"\n=== 摘要 ===")
-    log.info(f"  prompt 段数  : {len(prompts)}")
-    log.info(f"  含残留段数  : {len(by_label)}")
-    log.info(f"  残留 token 总数 : {len(all_residual)}")
-    log.info(f"  唯一残留 token : {len(set(all_residual))}")
+    log.info(f"  总段数              : {len(prompts)}")
+    log.info(f"  MCP 外部 (范围外)   : {mcp_segs}")
+    log.info(f"  含残留段 (非 MCP)   : {len(by_label)}")
+    log.info(f"  残留 token 总数     : {len(all_residual)}")
+    log.info(f"  唯一残留 token      : {len(set(all_residual))}")
 
     if by_label:
         log.info(f"\n=== 含残留段 (前 {args.show_residual}) ===")
@@ -240,8 +248,9 @@ def main():
         Path(args.json).write_text(json.dumps({
             "mode": "capture",
             "captured": args.captured,
-            "total_prompts": len(prompts),
-            "prompts_with_residual": len(by_label),
+            "total_segments": len(prompts),
+            "mcp_external_segments": mcp_segs,
+            "segments_with_residual": len(by_label),
             "total_residual_tokens": len(all_residual),
             "unique_residual_tokens": sorted(set(all_residual)),
             "by_label": by_label,
@@ -249,9 +258,10 @@ def main():
         log.info(f"\nJSON 报告: {args.json}")
 
     if all_residual:
-        log.error(f"\n[FAIL] CAPTURE strict 失败: {len(set(all_residual))} 个未翻译/未 whitelist 的英文 token")
+        log.error(f"\n[FAIL] CAPTURE strict 失败: {len(set(all_residual))} 个未翻译/未 whitelist 的英文 token "
+                  f"(含中文段内残留也计; MCP 范围外已排除)")
         sys.exit(2)
-    log.info(f"\n[OK] CAPTURE strict pass")
+    log.info(f"\n[OK] CAPTURE strict pass (非 MCP 段每个英文 token 均已译或显式入白)")
 
 
 if __name__ == "__main__":
