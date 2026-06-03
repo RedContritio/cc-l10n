@@ -32,7 +32,7 @@
   "Optional name for a new worktree. Each \"/\"-separated segment may contain only letters, digits, dots, underscores, and dashes; max 64 chars total. A random name is generated if not provided. Mutually exclusive with `path`.": "新 worktree 的可选名称。每个 \"/\" 分隔的段只能包含字母、数字、点、下划线和破折号；总共最多 64 个字符。如果未提供，生成随机名称。与 `path` 互斥。",
   "Path to an existing worktree of the current repository to switch into instead of creating a new one. Must appear in `git worktree list` for the current repo. Mutually exclusive with `name`.": "当前 repository 中现有 worktree 的路径，用于切换到该 worktree 而不是创建新的。必须出现在当前 repo 的 `git worktree list` 中。与 `name` 互斥。",
   "Prompt-based permissions needed to implement the plan. These describe categories of actions rather than specific commands.": "实现 plan 所需的基于 prompt 的权限。这些描述的是操作类别而非具体命令。",
-  "The tool this prompt applies to": "此 prompt 适用的 tool",
+  "The tool this prompt applies to": "此 prompt 适用的工具",
   "Semantic description of the action, e.g. \"run tests\", \"install dependencies\"": "语义化的操作描述，例如 \"run tests\"、\"install dependencies\"",
   "\"keep\" leaves the worktree and branch on disk; \"remove\" deletes both.": "\"keep\" 保留磁盘上的 worktree 和分支；\"remove\" 删除两者。",
   "Required true when action is \"remove\" and the worktree has uncommitted files or unmerged commits. The tool will refuse and list them otherwise.": "当 action 为 \"remove\" 且 worktree 有未提交的文件或未合并的提交时必须设为 true。否则工具将拒绝并列出这些文件。",
