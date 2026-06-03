@@ -1,0 +1,8 @@
+{
+  "_comment": "task2 prose 补译 (FN=0)。三处真·未译: (1) Grep 主描述 fragA — 模板 `...via ${dq} —— [fragB]`, fragB 在 26_prose 已落地, 仅 ${dq}(=Bash) 前半句漏译; src 取 binary frag(decoded)形态, 末尾留空格衔接 ${dq}。(2) Workflow.args 字段 — cli.js 里是 3 段 dq `+` 拼接 (捕获是拼接解析值故整串 0 命中), 按 3 frag 建条, dst 拼接后通顺。(3) Edit.old_string — 整 dq 字面量, decode-match 主路精确匹配不会子串误命中 new_string 描述, 故直接译 (非入白)。",
+  "Content search built on ripgrep. Prefer this over `grep`/`rg` via ": "基于 ripgrep 构建的内容搜索。优先用本工具而非 `grep`/`rg`,后者需经由 ",
+  "Optional input value exposed to the script as the global `args`, verbatim. Pass arrays/objects as actual JSON values, NOT as a ": "暴露给脚本作为全局 `args` 的可选输入值,逐字传入。把数组/对象作为真正的 JSON 值传入,而不是 ",
+  "JSON-encoded string — a stringified list breaks `args.filter`/": "JSON 编码的字符串 —— 字符串化的列表会破坏脚本里的 `args.filter`/",
+  "`args.map` in the script. Use for parameterized named workflows (e.g. a research question).": "`args.map`。用于参数化的具名 workflow(例如一个研究问题)。",
+  "The text to replace": "要替换的文本"
+}
