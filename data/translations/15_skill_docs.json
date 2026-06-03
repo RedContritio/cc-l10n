@@ -313,6 +313,6 @@
   "You can also configure this in /config or with the --ide flag": "你也可以在 /config 中或使用 --ide 标志来配置此项",
   "You may specify an optional timeout in milliseconds (up to": "你可以指定一个可选的超时(单位毫秒,最长",
   "You must restart Terminal.app for changes to take effect.": "你必须重启 Terminal.app 才能让变更生效。",
-  "# Memory\n\nYou have a persistent file-based memory": "# Memory\n\n你拥有一个持久的、基于文件的 memory",
+  "# Memory\n\nYou have a persistent file-based memory ": "# Memory\n\n你拥有一个持久的、基于文件的 memory ",
   "You can continue working there by running: cd": "你可以通过运行下面的命令继续在那里工作: cd"
 }
