@@ -1,13 +1,14 @@
 """
 探测 transcript jsonl 记录是否为 CC 注入的 "tool call could not be parsed" 事件标记.
 
-精确谓词 (结构 + 完全等值), 对 "对话里引用该串" 的记录零误报:
+HARD / SOFT 精确谓词 (结构 + 完全等值), 对 "对话里引用该串" 的记录零误报:
   HARD: type=="assistant" ∧ isApiErrorMessage is True ∧ message.model=="<synthetic>"
         ∧ 任一 content text 块完全等于 HARD_MARKER
   SOFT: type=="user" ∧ isMeta is True ∧ message.content (纯字符串) 完全等于 SOFT_MARKER
-  SILENT: 工具调用文本化逃逸 (assistant, stop!=tool_use, 无 tool_use 块, text 含损坏
-          opener 裸词行 + <invoke)。**best-effort, 非零误报** (见 _is_silent_escape_text):
-          已防 fenced 代码块, 但散文同形仍会假阳性, 且漏报非 [a-z]{2,12} 形态。
+另有 SILENT —— **best-effort, 非零误报** (见 _is_silent_escape_text):
+  工具调用文本化逃逸 (assistant, stop!=tool_use, 无 tool_use 块, text 含损坏 opener
+  裸词行 + <invoke)。已防 fenced 代码块 (全局围栏区间判断), 但散文同形仍会假阳性,
+  且漏报非 [a-z]{2,12} 形态。
 """
 from __future__ import annotations
 
@@ -23,20 +24,46 @@ SYNTHETIC_MODEL = "<synthetic>"
 _SILENT_ESCAPE_RE = re.compile(r"\n[a-z]{2,12}\n<invoke name=")
 
 
+def _fenced_spans(text: str) -> list:
+    """所有 fenced 代码块【内容】的 [start, end) 字符区间 (``` 围栏行之间)。
+
+    未闭合的 ``` 视为延伸到文本末尾。用于判断逃逸 opener 是否落在代码块内 (贴原文)。
+    """
+    spans = []
+    offset = 0
+    open_at = None
+    for line in text.split("\n"):
+        line_start = offset
+        line_end = offset + len(line)
+        if line.lstrip().startswith("```"):
+            if open_at is None:
+                open_at = line_end + 1   # 内容从围栏行的下一行起
+            else:
+                spans.append((open_at, line_start))
+                open_at = None
+        offset = line_end + 1            # +1 跨过 \n
+    if open_at is not None:
+        spans.append((open_at, len(text)))
+    return spans
+
+
 def _is_silent_escape_text(text: str) -> bool:
     """text 是否含"损坏 opener 裸词行 + <invoke"的文本化逃逸模式。
 
     best-effort, **不是零误报**:
-    - 已防 fenced 代码块: opener 词前一行若是 ``` (含 ```lang) 则视为"贴逃逸原文",
-      非真逃逸 —— 这是讨论该 bug 时最常见的误报来源 (含本类评审对话)。
+    - 已防 fenced 代码块: opener 词落在 ``` 围栏区间内 (含带语言标签 ```lang、围栏与
+      内容间有空行) 视为"贴逃逸原文", 非真逃逸 —— 讨论该 bug 时最常见的误报来源
+      (含本类评审对话)。用全局围栏区间判断 (而非仅看前一行), 故闭合围栏【之后】的真
+      逃逸不会被误跳 (修 8c6d70b 前一行启发式的 FN)。
     - 仍会假阳性: 散文里"普通文本行 + 损坏 opener 词单独成行 + <invoke" 与真逃逸字节
-      同形, 无法区分 (罕见, 主要见于讨论该 bug 的散文)。
+      同形无法区分 (罕见); 前面有【未闭合】``` 时其后的真逃逸会被当块内漏报 (更罕见)。
     - 漏报: opener 非 [a-z]{2,12} 形态 (含数字/大写/超长) 不匹配。
     """
+    spans = _fenced_spans(text)
     for m in _SILENT_ESCAPE_RE.finditer(text):
-        last_line = text[:m.start()].rsplit("\n", 1)[-1]
-        if last_line.lstrip().startswith("```"):
-            continue  # opener 词在 fenced 代码块内 → 贴原文, 跳过
+        opener_pos = m.start() + 1       # 跳过匹配开头的 \n, 指向损坏 opener 词
+        if any(s <= opener_pos < e for s, e in spans):
+            continue                     # opener 在 fenced 块内 → 贴原文, 跳过
         return True
     return False
 

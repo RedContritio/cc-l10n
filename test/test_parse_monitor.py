@@ -159,6 +159,19 @@ def test_silent_no_false_positive_on_fenced_with_lang_tag():
     assert classify_record(rec) is None
 
 
+def test_silent_real_escape_after_fenced_block():
+    # 真逃逸紧跟在 fenced 代码块【闭合】之后 (opener 在块外) → 应识别为 silent (防 FN)
+    rec = _silent_record(text='讨论:\n```\nsome code\n```\ncore\n<invoke name="Bash">x</invoke>')
+    r = classify_record(rec)
+    assert r is not None and r["severity"] == "silent"
+
+
+def test_silent_no_false_positive_on_fenced_with_blank_line():
+    # fenced 块内容与围栏间有空行 (合法 markdown), opener 仍在块内 → 不误报
+    rec = _silent_record(text='```\n\ncore\n<invoke name="X">x</invoke>\n```')
+    assert classify_record(rec) is None
+
+
 # ---------- [detect] 健壮性 ----------
 
 def test_empty_record_returns_none():
