@@ -62,6 +62,9 @@ def scan_once(projects_root, offsets: dict, grouper: IncidentGrouper,
                 continue
             cls = classify_record(rec)
             if not cls:
+                # 普通记录: 用其真实 promptId 更新继承链, 防无 promptId 的 SILENT/HARD
+                # 错并入陈旧 promptId 的 incident (此前跳过使 _last_prompt 只被 SOFT 更新)
+                grouper.note_prompt(rec.get("sessionId"), rec.get("promptId"))
                 continue
             res = grouper.add(rec, cls, key, off)
             inc = res["incident"]

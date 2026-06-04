@@ -147,6 +147,18 @@ def test_silent_no_false_positive_on_inline_mention():
     assert classify_record(rec) is None
 
 
+def test_silent_no_false_positive_on_fenced_code_block():
+    # 把逃逸原文贴进 fenced 代码块 (讨论该 bug 最常见方式, 含本评审对话) → 不误报
+    rec = _silent_record(text='逃逸案例:\n```\ncore\n<invoke name="Bash">x</invoke>\n```\n注意此模式。')
+    assert classify_record(rec) is None
+
+
+def test_silent_no_false_positive_on_fenced_with_lang_tag():
+    # 带语言标签的 fenced opener (```python) 同样防护
+    rec = _silent_record(text='```python\ncore\n<invoke name="Bash">x</invoke>\n```')
+    assert classify_record(rec) is None
+
+
 # ---------- [detect] 健壮性 ----------
 
 def test_empty_record_returns_none():
@@ -214,6 +226,19 @@ def test_format_message_includes_silent_count():
            "silent_count": 2, "soft_count": 0, "hard_count": 0, "first_ts": "T"}
     msg = format_message(inc)
     assert "silent×2" in msg and "parse silent" in msg
+
+
+def test_grouper_note_prompt_prevents_silent_misattribution():
+    # 真实 bug (codeRail 复现): scan_once 跳过普通 user 记录使 _last_prompt 不更新,
+    # SILENT (无 promptId) 错继承旧 SOFT 的 promptId 并错并入其 incident。note_prompt
+    # 让普通 user 记录的真实 promptId 更新继承链, SILENT 归正确请求。
+    g = IncidentGrouper()
+    _add(g, _soft_record(prompt_id="P1"))        # SOFT incident key (s1, P1)
+    g.note_prompt("s1", "P2")                     # scan_once 对普通 user(P2) 记录会调
+    r = _add(g, _silent_record())                 # SILENT 无 promptId
+    assert r["is_new"] is True                    # 独立 incident, 不错并入 SOFT
+    assert r["incident"]["promptId"] == "P2"      # 继承 P2 而非陈旧 P1
+    assert r["incident"]["silent_count"] == 1
 
 
 def test_grouper_soft_then_hard_one_incident():
@@ -517,6 +542,28 @@ def test_scan_once_enriches_patch_state():
                   binary_provider=lambda ts: {"patched": False, "sha256": "orig"})
         inc = seen[0]["incident"]
         assert inc["patched"] is False and inc["binary_sha256"] == "orig"
+
+
+def test_scan_once_silent_not_misattributed_across_prompts():
+    # 真实 codeRail bug 复现: SOFT(P1) → 普通 user(P2) → SILENT(无 promptId)。
+    # scan_once 须用普通 user 的 P2 更新继承链, 使 SILENT 独立成 incident 而非错并入 SOFT。
+    with tempfile.TemporaryDirectory() as d:
+        proj = os.path.join(d, "projects")
+        os.makedirs(proj)
+        _write_jsonl(os.path.join(proj, "s.jsonl"), [
+            _soft_record(prompt_id="P1"),
+            {"type": "user", "promptId": "P2", "sessionId": "s1",
+             "message": {"role": "user", "content": "继续"}},
+            _silent_record(),
+        ])
+        g = IncidentGrouper()
+        scan_once(proj, {}, g, lambda res: None)
+        incs = g.incidents()
+        assert len(incs) == 2                       # SOFT(P1) 与 SILENT(P2) 各自独立
+        soft_inc = next(i for i in incs if i["promptId"] == "P1")
+        silent_inc = next(i for i in incs if i["promptId"] == "P2")
+        assert soft_inc["silent_count"] == 0        # SOFT incident 未被 SILENT 污染
+        assert silent_inc["severity"] == "silent" and silent_inc["silent_count"] == 1
 
 
 def _run_all():

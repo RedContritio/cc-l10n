@@ -29,9 +29,10 @@ capture_proxy.py（现有，按需）：digest 指出哪个项目/会话在复�
 - **detect.py** — 纯函数。`classify_record(rec) -> None | {severity, marker_text}`：
   - HARD：`type=="assistant"` ∧ `isApiErrorMessage==true` ∧ `message.model=="<synthetic>"` ∧ 任一 content.text 完全等于 HARD 串。
   - SOFT：`type=="user"` ∧ `isMeta==true` ∧ `message.content`（纯字符串）完全等于 SOFT 串。
-  - 严格结构 + 完全等值 → 对“对话里引用该串”的记录零误报。
+  - HARD/SOFT 严格结构 + 完全等值 → 对“对话里引用该串”的记录零误报。
+  - **SILENT（best-effort，非零误报）**：工具调用文本化逃逸 —— `type=="assistant"` ∧ 无 tool_use 块 ∧ `stop_reason!=tool_use` ∧ 某 text 块含“损坏 `<function_calls>` opener 裸词行 + `<invoke name=`”（CC 仅在 stop==tool_use 时注入 SOFT/HARD，故 end_turn 逃逸被 retry 路径漏抓）。**局限**：(a) 已防 fenced 代码块（贴原文，opener 前一行为 ``` 则跳过），但散文里“普通文本行 + 损坏 opener 词单独成行 + invoke”与真逃逸字节同形、无法区分，仍会假阳性（罕见，主要见于讨论该 bug 的对话）；(b) 漏报 opener 非 `[a-z]{2,12}` 形态（含数字/大写/超长）。
 - **incident.py** — `build_incident(rec, ctx)` 提取 `{ts, sessionId, project(cwd), gitBranch, version, severity, transcriptPath, lineNo, context(截断)}`；
-  按 `(sessionId, promptId/parentUuid 链)` 归并：一次 SOFT→升级 HARD = **一个** incident（severity 取最重），不重复计数。
+  按 `(sessionId, promptId)` 归并：一次 SOFT→升级 HARD = **一个** incident（severity 取最重，hard>soft>silent，silent 可被覆盖但不反向降级），不重复计数。无 promptId 的记录（HARD/SILENT）继承同 session 最近真实 promptId —— `scan_once` 对普通 user 记录调 `note_prompt` 更新继承链（防 SILENT 错并入陈旧 promptId 的 incident，修真实数据复现的跨请求污染）。**known-limitation**：尚未实现真正的 parentUuid 链回溯，多请求乱序交错时仍可能错并（见 BACKLOG #11-3e）。
 - **binary_state.py** — patch 指纹：
   - `resolve_active_binary()`：跟随 `~/.local/bin/claude` 符号链接到真二进制。
   - `probe_patch_state(path) -> {patched, sha256, version, probes}`：扫 2–3 条**已知翻译产物**（取早期 round 的稳定核心串，156/158 通用）。

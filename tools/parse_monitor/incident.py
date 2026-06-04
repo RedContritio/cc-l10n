@@ -80,5 +80,16 @@ class IncidentGrouper:
 
         return {"incident": inc, "is_new": is_new, "escalated": escalated}
 
+    def note_prompt(self, session, prompt_id) -> None:
+        """记录某 session 最近见到的真实 promptId (来自普通 user 记录, 非标记事件)。
+
+        watcher.scan_once 对未命中分类的普通记录调用此方法, 使无 promptId 的
+        SILENT/HARD 事件继承到真实最近 promptId, 避免错并入陈旧 promptId 的 incident
+        (修真实数据复现的 SILENT 跨请求错并: scan_once 此前 `if not cls: continue`
+        跳过普通 user 记录, _last_prompt 只被 SOFT 更新)。
+        """
+        if prompt_id is not None:
+            self._last_prompt[session] = prompt_id
+
     def incidents(self) -> list:
         return [self._incidents[k] for k in self._order]
