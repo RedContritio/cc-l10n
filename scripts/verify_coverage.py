@@ -35,7 +35,43 @@ from log_setup import setup_logging
 log = setup_logging(__name__)
 
 
+def _walk_schema_descriptions(node, path: str):
+    """递归 yield (label, text): JSON Schema 树中所有非空 description 字符串字段.
+
+    input_schema 里的 description 同样发给模型 (字段级说明), 不限于 properties
+    一层 —— 递归 DFS 覆盖 items / nested object / oneOf 等任意深度, 避免漏扫。
+    """
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if k == "description" and isinstance(v, str):
+                if v.strip():
+                    yield (f"{path}.description", v)
+            else:
+                yield from _walk_schema_descriptions(v, f"{path}.{k}")
+    elif isinstance(node, list):
+        for idx, item in enumerate(node):
+            yield from _walk_schema_descriptions(item, f"{path}[{idx}]")
+
+
+# 动态注入、不在 CC binary、cc-l10n 物理上无法静态译的内容 (与 MCP 同理, FN 门范围外):
+#   namespaced 'plugin:agent:' / 'plugin:skill:' 注册行 —— Agent 工具描述与 available-skills
+#   列表里, 已装 plugin 的 agent/skill 由 harness 运行时动态列出, 描述非 cli.js 静态字面量,
+#   换 plugin/机器即变。builtin (单名, 如 '- claude:' / '- reconsider:') 不匹配, 仍在范围内。
+OOS_PLUGIN_LINE = re.compile(r"^[ \t]*[-*][ \t]+[a-z][\w\-]*:[\w\-]+:.*$", re.MULTILINE)
+
+
+def strip_oos(text: str) -> tuple[str, int]:
+    """剔除范围外的动态 plugin 注册行, 返回 (清理后文本, 剔除行数)。"""
+    n = len(OOS_PLUGIN_LINE.findall(text))
+    return (OOS_PLUGIN_LINE.sub("", text), n) if n else (text, 0)
+
+
 def extract_all_prompts(jsonl_path: Path) -> list[tuple[str, str]]:
+    """提取实际发往 LLM 的全部英文承载文本: system[] + tools[] 描述 + input_schema descriptions.
+
+    tools[].description 与 input_schema 内的 description 字段是常驻工具集的一部分,
+    随每个请求发给模型 —— ground-truth 必须覆盖它们, 不受 binary 内如何存储/切碎/拼装影响。
+    """
     out = []
     for line_no, line in enumerate(jsonl_path.read_text().splitlines(), 1):
         rec = json.loads(line)
@@ -47,6 +83,21 @@ def extract_all_prompts(jsonl_path: Path) -> list[tuple[str, str]]:
             t = s.get("text", "")
             if t:
                 out.append((f"rec{line_no}.sys[{i}]", t))
+        tools = body.get("tools", [])
+        if not isinstance(tools, list):
+            tools = []
+        for ti, tool in enumerate(tools):
+            if not isinstance(tool, dict):
+                continue
+            name = tool.get("name", "?")
+            # 标签含工具下标 ti 保证唯一 (同名工具不会 label 碰撞导致 dict 丢值)
+            base = f"rec{line_no}.tool[{ti}:{name}]"
+            desc = tool.get("description", "")
+            if isinstance(desc, str) and desc.strip():
+                out.append((f"{base}.description", desc))
+            schema = tool.get("input_schema")
+            if isinstance(schema, dict):
+                out.extend(_walk_schema_descriptions(schema, f"{base}.input_schema"))
     return out
 
 
@@ -61,20 +112,27 @@ def find_residual_tokens(text: str, wl: dict) -> list[str]:
     实现: 全文先减去 whitelist literal_exact / exact / regex 匹配, 再提取剩余
     3+ 字母英文 token. 用空格替换 (而非空串) 避免 "Claude Code" -> 减去
     "Claude" 后变 " Code" 仍触发, 减成空格后保留 token 边界.
+
+    顺序 literal_exact -> exact -> regex: literal_exact 先减保护代码示例块整体 (否则
+    word 级 exact / 结构 regex 会先打碎块, 令块的 literal_exact 失配)。env 标签:值 这类
+    被 exact 标签词打碎的少数情形, 用不依赖标签词的 regex (值位置) 兜。
     """
     if not text.strip():
         return []
 
     s = text
-    # 减去 literal_exact (整段完全匹配; 长度倒序以最长优先)
+    # 减去 literal_exact (整段完全匹配; 长度倒序以最长优先, 保护代码块)。
+    # literal_exact 是【特定长串】整体匹配 (代码块/多词示例), 非单词子串, 故仍用 substring。
     for item in sorted(wl.get("literal_exact", ()), key=len, reverse=True):
         if item and item in s:
             s = s.replace(item, " ")
-    # 减去 exact (子串匹配; 长度倒序避免短词截断长词)
+    # 减去 exact (**词边界匹配, 非子串** —— 用户铁律: 禁短词吃长词中段, 如 cat 吃 noti·cat·ion /
+    # any 吃 m·any / PR 吃 DE·PR·ECATED。两端须非字母才命中。长度倒序仍保留)。
     for item in sorted(wl.get("exact", []), key=len, reverse=True):
         if not item:
             continue
-        s = s.replace(item, " ")
+        # 仅当 item 两端字符均非 ASCII 字母时才算完整词命中
+        s = re.sub(r"(?<![A-Za-z])" + re.escape(item) + r"(?![A-Za-z])", " ", s)
     # 减去 regex
     for pat in wl.get("regex", []):
         s = pat.sub(" ", s)
@@ -174,24 +232,36 @@ def main():
         log.info(f"\n[OK] STATIC strict pass")
         return
 
-    # CAPTURE 模式
+    # CAPTURE 模式: token 级 strict (对所有非 MCP 段, 含中文段一并查 —— 不接受
+    # "段含中文=整段跳过" 的容忍)。残留英文 token 必须【译掉】或【显式入白】(每个实例/术语
+    # 都是已知 whitelist 条目)。MCP 外部工具 (label 含 mcp__) 范围外: 描述由 MCP server
+    # 运行时注入, 不在 CC binary, cc-l10n 物理上无法翻译, 单列不计入 FN 门。
     prompts = extract_all_prompts(Path(args.captured))
-    log.info(f"=== CAPTURE strict 验证 ===")
-    log.info(f"提取 {len(prompts)} 段 system prompt")
+    log.info(f"=== CAPTURE strict 验证 (token 级, 含中文段一并查) ===")
+    log.info(f"提取 {len(prompts)} 段 (system + tools[] + input_schema descriptions)")
 
     all_residual = []
     by_label = {}
+    mcp_segs = 0
+    oos_lines = 0
     for label, text in prompts:
+        if "mcp__" in label:
+            mcp_segs += 1  # 范围外, 不查
+            continue
+        text, n_oos = strip_oos(text)  # 剔除动态 plugin 注册行 (范围外, 同 MCP)
+        oos_lines += n_oos
         residuals = find_residual_tokens(text, wl)
         if residuals:
             by_label[label] = sorted(set(residuals))
             all_residual.extend(residuals)
 
     log.info(f"\n=== 摘要 ===")
-    log.info(f"  prompt 段数  : {len(prompts)}")
-    log.info(f"  含残留段数  : {len(by_label)}")
-    log.info(f"  残留 token 总数 : {len(all_residual)}")
-    log.info(f"  唯一残留 token : {len(set(all_residual))}")
+    log.info(f"  总段数              : {len(prompts)}")
+    log.info(f"  MCP 外部 (范围外)   : {mcp_segs}")
+    log.info(f"  plugin 注册行剔除   : {oos_lines} (动态, 范围外)")
+    log.info(f"  含残留段 (非 MCP)   : {len(by_label)}")
+    log.info(f"  残留 token 总数     : {len(all_residual)}")
+    log.info(f"  唯一残留 token      : {len(set(all_residual))}")
 
     if by_label:
         log.info(f"\n=== 含残留段 (前 {args.show_residual}) ===")
@@ -202,8 +272,9 @@ def main():
         Path(args.json).write_text(json.dumps({
             "mode": "capture",
             "captured": args.captured,
-            "total_prompts": len(prompts),
-            "prompts_with_residual": len(by_label),
+            "total_segments": len(prompts),
+            "mcp_external_segments": mcp_segs,
+            "segments_with_residual": len(by_label),
             "total_residual_tokens": len(all_residual),
             "unique_residual_tokens": sorted(set(all_residual)),
             "by_label": by_label,
@@ -211,9 +282,10 @@ def main():
         log.info(f"\nJSON 报告: {args.json}")
 
     if all_residual:
-        log.error(f"\n[FAIL] CAPTURE strict 失败: {len(set(all_residual))} 个未翻译/未 whitelist 的英文 token")
+        log.error(f"\n[FAIL] CAPTURE strict 失败: {len(set(all_residual))} 个未翻译/未 whitelist 的英文 token "
+                  f"(含中文段内残留也计; MCP 范围外已排除)")
         sys.exit(2)
-    log.info(f"\n[OK] CAPTURE strict pass")
+    log.info(f"\n[OK] CAPTURE strict pass (非 MCP 段每个英文 token 均已译或显式入白)")
 
 
 if __name__ == "__main__":

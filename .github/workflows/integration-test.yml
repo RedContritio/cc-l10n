@@ -2,22 +2,34 @@ name: integration-test
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
+  schedule:
+    # 每周一 06:23 UTC: 更广的抽样跑 (每 minor latest + 当前 minor 最近 5) + 聚合
+    # no-stale 门 (--check-stale)。错峰非整点避开 GitHub Actions 整点调度拥堵。
+    - cron: '23 6 * * 1'
   workflow_dispatch:
     inputs:
       versions:
-        description: '逗号分隔版本号 (空=dist-tags latest+stable)'
+        description: '逗号分隔版本号 (空=--supported 受支持版本集)'
         required: false
         default: ''
       all_versions:
         description: '跑 npm 上全部版本 (覆盖 versions 输入)'
         required: false
         default: 'false'
+      check_stale:
+        description: '启用聚合 no-stale 失败门 (真 stale = 跨整个运行集都不命中)'
+        required: false
+        default: 'false'
 
-# 简化版: 单 job, 一个进程内跑 latest+stable × 三平台 (linux/win/mac)。
-# 平台子包仅 2.1.110+ 才有, 缺失组合走 404-skip。
-# 覆盖率 (verify untranslated_prompt=0) 是硬门; 聚合 no-stale 暂仅信息提示
-# (译文集版本范围未定; 待定后给手动 dispatch 或主 push 加 --check-stale)。
+# 单 job, 一个进程内跑目标版本 × 三平台 (linux/win/mac)。平台子包仅 2.1.110+ 才有,
+# 缺失组合走 404-skip。覆盖率 (verify untranslated_prompt=0) 是硬门。
+# 触发分流 (见 resolve step):
+#   - push/默认 dispatch: --supported (data/supported_versions.json 声明的受支持版本,
+#     与 npm dist-tags 解耦) 快速门 + orig hash 断言, 不开 --check-stale。
+#   - schedule (每周): 抽样 (更广) + --check-stale, 对整个运行集判真 stale (死译文清理信号);
+#     verify=0 仅对受支持版本 (新版 latest 不在配置则只验流水线鲁棒, 不被动变红)。
+#   - 手动 dispatch 可经 check_stale 输入显式开门; all_versions=true 跑全历史。
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -33,17 +45,23 @@ jobs:
       - id: resolve
         name: 解析目标版本
         run: |
-          if [ "${{ inputs.all_versions }}" = "true" ]; then
+          extra=""
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            mode=""                  # 默认抽样: 每 minor latest + 当前 minor 最近 5 (比 dist-tags 广)
+            extra="--check-stale"    # 广跑 → 对整个运行集判真 stale (#4)
+          elif [ "${{ inputs.all_versions }}" = "true" ]; then
             mode="--all"
           elif [ -n "${{ inputs.versions }}" ]; then
             mode="--versions-csv ${{ inputs.versions }}"
           else
-            mode="--dist-tags"
+            mode="--supported"
           fi
+          if [ "${{ inputs.check_stale }}" = "true" ]; then extra="--check-stale"; fi
           echo "mode=$mode" >> $GITHUB_OUTPUT
+          echo "extra=$extra" >> $GITHUB_OUTPUT
           vers=$(python3 scripts/integration_test.py $mode --list | tr '\n' '-')
           echo "vers=$vers" >> $GITHUB_OUTPUT
-          echo "目标版本: $vers (mode=$mode)"
+          echo "目标版本: $vers (mode=$mode extra=$extra)"
 
       - name: 缓存 CC binary
         uses: actions/cache@v4
@@ -51,5 +69,5 @@ jobs:
           path: ~/.cache/cc-l10n/integration
           key: cc-bins-${{ steps.resolve.outputs.vers }}
 
-      - name: 跑集成测试 (${{ steps.resolve.outputs.mode }} × 三平台)
-        run: python3 scripts/integration_test.py ${{ steps.resolve.outputs.mode }}
+      - name: 跑集成测试 (${{ steps.resolve.outputs.mode }} ${{ steps.resolve.outputs.extra }} × 三平台)
+        run: python3 scripts/integration_test.py ${{ steps.resolve.outputs.mode }} ${{ steps.resolve.outputs.extra }}

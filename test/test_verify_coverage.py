@@ -17,15 +17,17 @@ verify_coverage CAPTURE 模式契约测试.
 """
 from __future__ import annotations
 
+import json
 import re
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent / "scripts"
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-from verify_coverage import find_residual_tokens  # noqa: E402
+from verify_coverage import find_residual_tokens, extract_all_prompts  # noqa: E402
 
 
 def make_wl(exact=None, regex=None, literal_exact=None) -> dict:
@@ -103,6 +105,98 @@ class TestFindResidualTokens(unittest.TestCase):
         wl = make_wl(exact=["Anthropic"])
         residual = find_residual_tokens("You should read the manual", wl)
         self.assertEqual(set(residual), {"You", "should", "read", "the", "manual"})
+
+
+class TestExtractAllPrompts(unittest.TestCase):
+    """#2: CAPTURE 模式应扫 body['tools'][*].description + input_schema descriptions,
+    不只是 body['system']. 这是 ground-truth 门 (度量真发给模型的英文)."""
+
+    def _write_jsonl(self, body: dict) -> Path:
+        td = tempfile.mkdtemp()
+        p = Path(td) / "captured.jsonl"
+        p.write_text(json.dumps({"body": json.dumps(body, ensure_ascii=False)}) + "\n")
+        return p
+
+    def test_extracts_system_tools_and_schema(self):
+        body = {
+            "system": [{"type": "text", "text": "你是助手"}],
+            "tools": [{
+                "name": "Bash",
+                "description": "Execute a bash command",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "command": {"type": "string", "description": "The command to run"},
+                        "timeout": {"type": "number", "description": "毫秒超时"},
+                    },
+                },
+            }],
+        }
+        out = dict(extract_all_prompts(self._write_jsonl(body)))
+        labels = set(out)
+        self.assertIn("rec1.sys[0]", labels)
+        self.assertIn("rec1.tool[0:Bash].description", labels)
+        self.assertEqual(out["rec1.tool[0:Bash].description"], "Execute a bash command")
+        # 嵌套 input_schema properties 的 description 也被提取
+        cmd_label = "rec1.tool[0:Bash].input_schema.properties.command.description"
+        self.assertIn(cmd_label, labels)
+        self.assertEqual(out[cmd_label], "The command to run")
+
+    def test_duplicate_tool_names_no_label_collision(self):
+        # 两个同名工具: label 含下标 ti, 不碰撞 -> 两条描述都保留 (dict 不丢值)
+        body = {"tools": [
+            {"name": "Bash", "description": "First desc here"},
+            {"name": "Bash", "description": "Second desc here"},
+        ]}
+        out = dict(extract_all_prompts(self._write_jsonl(body)))
+        self.assertEqual(out.get("rec1.tool[0:Bash].description"), "First desc here")
+        self.assertEqual(out.get("rec1.tool[1:Bash].description"), "Second desc here")
+
+    def test_skips_malformed_tools_and_schema(self):
+        # tools 非 list / tool 非 dict / input_schema 非 dict / description 非 str -> 不崩, 安全跳过
+        for body in (
+            {"tools": {"name": "X", "description": "Run it"}},      # tools 是 dict
+            {"tools": "Run it"},                                     # tools 是 string
+            {"tools": ["notadict", 123, None]},                      # 元素非 dict
+            {"tools": [{"name": "T", "input_schema": "string"}]},    # schema 非 dict
+            {"tools": [{"name": "T", "input_schema": {"properties": {"x": {"description": 123}}}}]},  # desc 非 str
+        ):
+            out = extract_all_prompts(self._write_jsonl(body))
+            self.assertEqual(out, [], f"畸形输入应返回空, body={body}")
+
+    def test_residual_found_in_tool_description(self):
+        # 端到端: 未翻工具描述应被 find_residual_tokens 报残留
+        body = {"tools": [{"name": "X", "description": "Run the deploy script"}]}
+        out = extract_all_prompts(self._write_jsonl(body))
+        wl = make_wl()
+        residual = []
+        for _, text in out:
+            residual.extend(find_residual_tokens(text, wl))
+        self.assertEqual(set(residual), {"Run", "the", "deploy", "script"})
+
+    def test_recurses_nested_schema(self):
+        # items / 深层嵌套 object 内的 description 也要扫到 (递归 DFS)
+        body = {"tools": [{
+            "name": "T",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "files": {
+                        "type": "array",
+                        "items": {"type": "string", "description": "An absolute path"},
+                    },
+                },
+            },
+        }]}
+        out = dict(extract_all_prompts(self._write_jsonl(body)))
+        nested = [v for k, v in out.items() if v == "An absolute path"]
+        self.assertEqual(nested, ["An absolute path"])
+
+    def test_skips_empty_descriptions(self):
+        body = {"tools": [{"name": "T", "description": "  ",
+                           "input_schema": {"properties": {"x": {"description": ""}}}}]}
+        out = extract_all_prompts(self._write_jsonl(body))
+        self.assertEqual(out, [])
 
 
 if __name__ == "__main__":

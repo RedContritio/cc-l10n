@@ -5,6 +5,8 @@ __pycache__/
 *.pyd
 .Python
 *.egg-info/
+.venv/
+venv/
 
 # 运行时 dump 出来的 cli.js / cli.js 拆分 / 临时分析输出
 decompiled/

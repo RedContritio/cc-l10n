@@ -42,6 +42,7 @@ PROJECT_ROOT = SCRIPT_DIR.parent
 sys.path.insert(0, str(SCRIPT_DIR))
 
 from log_setup import setup_logging  # noqa: E402
+import supported_versions as suppver  # noqa: E402
 
 log = setup_logging("integration_test")
 
@@ -159,23 +160,6 @@ def fetch_binary(version: str, platform_pkg: str = PLATFORM_PKG) -> Path:
     return binary_path
 
 
-def _ver_key(v: str) -> tuple:
-    try:
-        return tuple(int(x) for x in v.split("."))
-    except ValueError:
-        return (0,)
-
-
-def coverage_versions(versions: list[str]) -> set[str]:
-    """每 minor 的最新 patch 需 verify=0 (全覆盖); 过渡 patch 只验流水线鲁棒 (B 语义)."""
-    best: dict[str, str] = {}
-    for v in versions:
-        m = ".".join(v.split(".")[:2])
-        if m not in best or _ver_key(v) > _ver_key(best[m]):
-            best[m] = v
-    return set(best.values())
-
-
 def run_pipeline(binary: Path, require_coverage: bool) -> tuple[bool, str]:
     """B 语义: repack --strict (流水线鲁棒: skip=0/placeholder=0) 对所有版本;
     coverage-required 版再 verify (untranslated_prompt=0). 平台由 binary 自动判。"""
@@ -219,6 +203,35 @@ def collect_matched(binary: Path, trans_keys: set[str], wl_srcs: list[str],
             matched.add(src)
 
 
+def resolve_supported(supported_csv: str | None,
+                      default_versions: list[str]) -> set[str]:
+    """译文集官方支持的版本范围 (--check-stale 据此判真 stale)。
+
+    --supported-versions CSV 显式指定; 否则默认 = 本次运行的版本集 (default_versions)。
+
+    为何默认取运行集而非 dist-tags: 译文集是跨版本并集, 含为 latest/stable 之外的
+    维护变体 (实测补过 2.1.150/158/159 等)。若把 supported 钉死在窄窄两个 dist-tag,
+    那些维护变体会被误判真 stale。正解是【跑足够广的集合 (--all / 抽样) 并对运行集判
+    stale】: 跨整个运行集都不命中的条目才是真死译文。窄运行集 (如 --dist-tags) 不应开
+    --check-stale (会误杀维护变体); 想显式收窄判定范围时用 --supported-versions。
+    """
+    if supported_csv:
+        picked = {v.strip() for v in supported_csv.split(",") if v.strip()}
+        if picked:  # 仅空白/逗号的 CSV 视为未指定, 回退默认 (而非空集 → 全判 stale)
+            return picked
+    return set(default_versions)
+
+
+def compute_stale(all_trans_keys: set[str], wl_srcs: list[str],
+                  matched: set[str]) -> list[str]:
+    """死译文/死白名单 = (全部 translation key ∪ whitelist src) - matched。
+
+    matched 的语义由调用方决定: --check-stale 时只累计【受支持版本】binary 的命中,
+    故此处算出的是真 stale (跨所有受支持版本都不命中); 信息模式下是 stale-vs-抽样。
+    """
+    return sorted((set(all_trans_keys) | set(wl_srcs)) - set(matched))
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -227,11 +240,19 @@ def main() -> int:
     ap.add_argument("--versions-csv", default=None,
                     help="逗号分隔版本列表 (CI 输入用; 优先级高于 --version 和 --all)")
     ap.add_argument("--dist-tags", action="store_true",
-                    help="只跑 npm dist-tags 的 latest+stable 版 (快速 CI 默认; 全要 verify=0)")
+                    help="只跑 npm dist-tags 的 latest+stable 版 (全要 verify=0)")
+    ap.add_argument("--supported", action="store_true",
+                    help="PR 门 (推荐): 版本集 = data/supported_versions.json 声明的受支持版本 "
+                         "(与 npm dist-tags 解耦); 逐版本×平台先校 orig cli.js sha256 == 配置, "
+                         "再 repack+verify=0")
     ap.add_argument("--all", action="store_true",
                     help="跑 npm 上所有版本 (慢; 默认: 抽样策略)")
     ap.add_argument("--check-stale", action="store_true",
-                    help="启用聚合 no-stale 失败门 (默认仅信息提示; 待译文集版本范围定后开)")
+                    help="启用聚合 no-stale 失败门 (真 stale = 不命中任何受支持版本; "
+                         "运行集会自动补齐 supported 以保证判定可靠)")
+    ap.add_argument("--supported-versions", default=None,
+                    help="逗号分隔的官方支持版本范围 (默认 = 本次运行的版本集); "
+                         "--check-stale 据此判真 stale (窄运行集会误杀跨版本维护变体)")
     ap.add_argument("--current-minor-recent", type=int, default=5,
                     help="当前 minor 额外抽最近 N 个 patch (默认 5)")
     ap.add_argument("--list", action="store_true",
@@ -246,8 +267,15 @@ def main() -> int:
 
     # explicit_targets: 用户显式点名/dist-tag 的版本 = 真实发布目标, 全要 verify=0;
     # 抽样/--all 走 B 语义 (每 minor 最新才全覆盖, 过渡 patch 仅流水线鲁棒)。
+    # 配置 = "哪些版本要 verify=0" 的唯一真相, 总是加载 (各模式据此 gate 覆盖要求)。
+    supported_cfg = suppver.load_config()
+    supported_set = set(suppver.supported_versions(supported_cfg))
+
     explicit_targets = False
-    if args.versions_csv:
+    if args.supported:
+        versions = sorted(supported_set, key=parse_version)
+        explicit_targets = True  # 受支持版本都是发布目标, 全要 verify=0
+    elif args.versions_csv:
         versions = [v.strip() for v in args.versions_csv.split(",") if v.strip()]
         explicit_targets = True
     elif args.version:
@@ -272,12 +300,35 @@ def main() -> int:
 
     platforms = ([args.platform_pkg] if args.platform_pkg
                  else [p.strip() for p in args.platforms.split(",") if p.strip()])
-    cov_versions = set(versions) if explicit_targets else coverage_versions(versions)
+
+    # #4 聚合 no-stale 版本范围: --check-stale 时定义 supported 范围, 并把它并入运行集
+    # (保证每个受支持版本都被跑过 → matched 完整 → stale 判定可靠); matched 之后只累计
+    # supported 版本的命中, 故 stale = 跨所有受支持版本都不命中 = 真死译文。
+    supported: set[str] = set()
+    if args.check_stale:
+        supported = resolve_supported(args.supported_versions, versions)
+        log.info(f"--check-stale: 受支持版本范围 = {sorted(supported, key=parse_version)}")
+        # 护栏: 窄运行集 (dist-tags/单版本) 且无显式 --supported-versions 时, supported
+        # 仅含那一两个版本, 跨版本维护变体会被误判 stale。提醒用户用抽样/--all 或显式指定。
+        if not args.supported_versions and len(supported) <= 2 and (args.dist_tags or args.version):
+            log.warning(f"[WARN] --check-stale 配窄运行集 (supported 仅 {len(supported)} 版): "
+                        f"跨版本维护变体可能被误判 stale。广覆盖请用抽样/--all, 或显式 --supported-versions。")
+        missing = supported - set(versions)
+        if missing:
+            log.info(f"  运行集补齐 supported 缺失版本: {sorted(missing, key=parse_version)}")
+            versions = sorted(set(versions) | supported, key=parse_version)
+
+    # verify=0 真相 = data/supported_versions.json (决策 A: 配置解耦 dist-tags)。
+    #   显式点名 (--supported/--version/--versions-csv/--dist-tags): 点到的都要 verify=0;
+    #   抽样/--all: 仅【受支持版本】要 verify=0 (新版本 latest 不在配置则只验流水线鲁棒,
+    #   不被动变红 —— 治本 npm 跳 latest→CI 红)。no-stale 的 supported 范围只管 stale 判定,
+    #   不再当 verify=0 目标。
+    cov_versions = set(versions) if explicit_targets else (set(versions) & supported_set)
 
     log.info(f"将跑 {len(versions)} 版 × {len(platforms)} 平台 (B 语义)")
     log.info(f"  版本: {versions}")
     log.info(f"  平台: {[p.split('/')[-1] for p in platforms]}")
-    log.info(f"  需全覆盖 (每 minor 最新, verify=0): {sorted(cov_versions)}")
+    log.info(f"  需 verify=0 (受支持版本): {sorted(cov_versions)}")
     log.info(f"  其余: 仅验流水线鲁棒 (apply 成功/skip=0); cache: {CACHE_DIR}")
 
     # 聚合 no-stale 用: 所有 translation key + whitelist src, 跨所有 binary 累计命中
@@ -287,6 +338,7 @@ def main() -> int:
     wl_srcs = [s for s in wl.get("literal_exact", ()) if s and not s.startswith("_comment")]
     matched: set[str] = set()
     all_trans_keys: set[str] = set()
+    collected_versions: set[str] = set()  # 实际成功 collect_matched 的版本 (≥1 平台)
 
     failed = []
     skipped = []
@@ -307,21 +359,40 @@ def main() -> int:
                 log.error(f"[FAIL] {label}: fetch error: {e}")
                 failed.append(label)
                 continue
+            if supported_cfg is not None:
+                pk = suppver.platform_key(pkg)
+                want = suppver.expected_hash(supported_cfg, v, pk)
+                got = suppver.cli_js_sha256(binary)
+                if want is None:
+                    log.error(f"[FAIL] {label}: 配置缺 {v}/{pk} 的 orig hash "
+                              f"(运行 gen_supported_versions.py 补录)")
+                    failed.append(label)
+                    continue
+                if got != want:
+                    log.error(f"[FAIL] {label}: orig cli.js sha256 漂移 "
+                              f"(配置 {want[:16]}… != 实测 {got[:16]}…); "
+                              f"CC 升级或下载损坏, 译文未对该 binary 构建")
+                    failed.append(label)
+                    continue
             ok, err = run_pipeline(binary, require_coverage=(v in cov_versions))
             if ok:
                 log.info(f"[OK] {label}" + (" (full coverage)" if v in cov_versions else " (pipeline)"))
             else:
                 log.error(f"[FAIL] {label}:\n{err}")
                 failed.append(label)
-            try:
-                collect_matched(binary, plat_keys, wl_srcs, matched)
-            except Exception as e:
-                log.warning(f"[WARN] {label}: collect_matched 失败: {e}")
+            # --check-stale 时只累计【受支持版本】的命中 (matched 据此判真 stale);
+            # 信息模式累计所有运行版本 (stale-vs-抽样, 仅提示)。
+            if (not args.check_stale) or (v in supported):
+                try:
+                    collect_matched(binary, plat_keys, wl_srcs, matched)
+                    collected_versions.add(v)
+                except Exception as e:
+                    log.warning(f"[WARN] {label}: collect_matched 失败: {e}")
 
     # 聚合 no-stale: 任一 translation key / whitelist src 跨所有 (版本×平台) 都没命中 = 死译文/死白名单。
     # 默认仅信息提示 (译文集支持哪些版本尚未定; 145=stable/156=latest 都合法, 历史变体不算死);
     # --check-stale 才作失败门 (待版本范围定后开)。
-    stale = sorted((all_trans_keys | set(wl_srcs)) - matched)
+    stale = compute_stale(all_trans_keys, wl_srcs, matched)
     log.info("")
     log.info("=" * 40)
     log.info(f"运行: {len(versions)} 版 × {len(platforms)} 平台; "
@@ -329,8 +400,18 @@ def main() -> int:
     if skipped:
         log.info(f"  skip: {skipped[:20]}")
     stale_fail = bool(stale) and args.check_stale
+    # 护栏: 若某受支持版本全平台都没能 collect (404/fetch 失败), matched 缺其贡献,
+    # 仅存于该版本的活译文会被误判 stale → 判定不可靠, 本次不作失败门 (只警告)。
+    if args.check_stale:
+        uncollected = supported - collected_versions
+        if uncollected:
+            log.warning(f"[WARN] {len(uncollected)} 个受支持版本全平台未能收集 (404/失败): "
+                        f"{sorted(uncollected, key=parse_version)}; matched 不完整, stale 判定不可靠, "
+                        f"本次不作失败门 (修复版本可用性后重判)")
+            stale_fail = False
+    scope = (f"跨 {len(supported)} 个受支持版本" if args.check_stale else "全平台全抽样版本")
     log.info(f"聚合 no-stale: translation+whitelist 共 {len(all_trans_keys)+len(wl_srcs)} 条, "
-             f"全平台全版本未命中 {len(stale)} 条"
+             f"{scope}未命中 {len(stale)} 条"
              + ("" if args.check_stale else " (信息提示; --check-stale 才判失败)"))
     if stale:
         level = log.error if stale_fail else log.info

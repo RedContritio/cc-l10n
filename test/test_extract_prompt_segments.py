@@ -25,7 +25,10 @@ from pathlib import Path
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent / "scripts"
 sys.path.insert(0, str(SCRIPTS_DIR))
 
-from extract_prompt_segments import score_text, load_whitelist, is_whitelisted  # noqa: E402
+from extract_prompt_segments import (  # noqa: E402
+    score_text, load_whitelist, is_whitelisted, collect_template_groups,
+)
+from js_string_scanner import scan_string_literals  # noqa: E402
 
 
 class TestScoreText(unittest.TestCase):
@@ -67,6 +70,91 @@ class TestScoreText(unittest.TestCase):
         self.assertTrue(any("js_code" in e for e in ev), f"应触发 js_code penalty, evidence={ev}")
         self.assertLess(score, 5)
 
+    def test_prose_structure_boost(self):
+        # 长散文 prompt: 无 markdown 标题 / "You are" / IMPORTANT: 等强信号, 仅靠
+        # 句子标点密度 (逗号/句号/分号后接空白) 判为 prompt (score>=5)。
+        # 这正是 weak(score=4)->prompt 漏译根因的修复: 缺强信号的主 system prompt
+        # 行为指令散文以前停在 4 分, 落入 class=weak 而静默漏译。
+        text = ("For actions that are hard to reverse or outward-facing, confirm first "
+                "unless durably authorized or explicitly told to proceed without asking; "
+                "approval in one context doesn't extend to the next. Report outcomes "
+                "faithfully: if tests fail, say so with the output; if a step was skipped, "
+                "say that.")
+        score, ev = score_text(text)
+        self.assertGreaterEqual(score, 5, f"长散文应判为 prompt, 实际 {score}, ev={ev}")
+        self.assertIn("prose_structure", ev)
+
+    def test_minified_js_penalty_kills_residue(self):
+        # 含 >=3 个 minified-JS runtime token 的残片 -> minified_js penalty -8, 不进 prompt class
+        text = '})}catch(H){N(`error ${H}`,{reason:`failed`}),H.push(_)'
+        score, ev = score_text(text)
+        self.assertTrue(any(e.startswith("minified_js") for e in ev), f"应触发 minified_js, ev={ev}")
+        self.assertLess(score, 5, f"JS 残片不应进入 prompt class, score={score}")
+
+    def test_minified_js_lead_punct(self):
+        # 续接标点开头 + 1 个 runtime token + 非 imperative -> 触发
+        text = '}),content:`some trailing minified fragment here`'
+        score, ev = score_text(text)
+        self.assertTrue(any(e.startswith("minified_js") for e in ev), f"ev={ev}")
+
+    def test_minified_js_lead_exempts_imperative(self):
+        # 续接标点开头 + mj>=1, 但含 imperative_marker (IMPORTANT: 等) -> 豁免, 不触发 penalty
+        # 防止以标点起首的强指令 prompt 被误降权
+        text = "}: IMPORTANT: never call .then( on this handle; await it instead for safety always."
+        score, ev = score_text(text)
+        self.assertIn("imperative_marker", ev)
+        self.assertFalse(any(e.startswith("minified_js") for e in ev),
+                         f"含 imperative 应豁免 minified_js, ev={ev}")
+
+    def test_minified_js_no_false_positive_on_prompt(self):
+        # 真散文 prompt 不以续接标点开头、不含 3 个 runtime token -> 不应被 minified_js penalty
+        text = ("You are an interactive agent that helps the user with software "
+                "engineering tasks. Always confirm before destructive actions.")
+        score, ev = score_text(text)
+        self.assertFalse(any(e.startswith("minified_js") for e in ev),
+                         f"真 prompt 不应触发 minified_js, ev={ev}")
+        self.assertGreaterEqual(score, 5, f"真 prompt 应仍 >=5, score={score}")
+
+    def test_keyword_table_no_prose_boost(self):
+        # 语言关键字表: 长 + 含 if/else/for/in 等 stop_words, 但无句子标点 (空格分隔的
+        # token 流)。句子标点密度把它与散文 prompt 区分开 — 不触发 prose_structure,
+        # 不进入 prompt class (score<5)。避免把 CC 打包的 syntax-highlight 语言表误判。
+        text = ("int float string vector matrix if else switch case default while do "
+                "for in break continue global proc return array struct enum union typedef "
+                "const static void char short long double signed unsigned register extern")
+        score, ev = score_text(text)
+        self.assertNotIn("prose_structure", ev, f"关键字表不应判为散文, ev={ev}")
+        self.assertLess(score, 5, f"关键字表不应进入 prompt class, 实际 {score}, ev={ev}")
+
+
+class TestCollectTemplateGroups(unittest.TestCase):
+    """3a: 同一 template literal 的相邻 tmpl_frag 应归同组; 跨模板/数组不归组."""
+
+    def _groups(self, src: str):
+        cli = src.encode("utf-8")
+        ranges = list(scan_string_literals(cli))
+        groups = collect_template_groups(cli, ranges)
+        # 返回 {decoded_frag_text: root}, 仅 tmpl_frag
+        out = {}
+        for s, e, t in ranges:
+            if t == "tmpl_frag":
+                out[cli[s:e].decode("utf-8")] = groups[s]
+        return out
+
+    def test_same_template_grouped(self):
+        # `Frag one ${a} frag two ${b} end` -> 3 个 tmpl_frag 同 root
+        g = self._groups("x=`Frag one ${a} frag two ${b} end`;")
+        frags = [k for k in g if k.strip()]
+        self.assertEqual(len(frags), 3, f"应有 3 个 tmpl_frag, got {list(g)}")
+        roots = {g[k] for k in frags}
+        self.assertEqual(len(roots), 1, f"同模板 3 frag 应同 root, got {g}")
+
+    def test_separate_templates_not_grouped(self):
+        # 两个独立 template literal 之间夹 +x+ -> 不同 root
+        g = self._groups("a=`First part here`+x+`Second part here`;")
+        roots = {g[k] for k in g if k.strip()}
+        self.assertEqual(len(roots), 2, f"两独立模板应不同 root, got {g}")
+
 
 class TestLoadWhitelist(unittest.TestCase):
     def test_filters_comment_keys(self):
@@ -89,6 +177,29 @@ class TestLoadWhitelist(unittest.TestCase):
         # literal_exact: frozenset
         self.assertIn("Whole literal A", wl["literal_exact"])
         self.assertNotIn("_comment_lit_skip", wl["literal_exact"])
+
+    def test_padded_literal_exact_raises(self):
+        # 契约: literal_exact 条目带外层空白 (前/后导空白) = 静默死条目
+        # (is_whitelisted 用 strip 比较, 永不命中). load_whitelist 必须 raise.
+        for bad in ("  leading space", "trailing newline\n", "\n\nblock\n"):
+            with tempfile.TemporaryDirectory() as td:
+                wl_path = Path(td) / "wl.json"
+                wl_path.write_text(json.dumps({
+                    "literal_exact": ["Clean entry", bad],
+                }))
+                with self.assertRaises(ValueError):
+                    load_whitelist(wl_path)
+
+    def test_clean_literal_exact_loads(self):
+        # 已 strip 的条目正常加载, 不 raise
+        with tempfile.TemporaryDirectory() as td:
+            wl_path = Path(td) / "wl.json"
+            wl_path.write_text(json.dumps({
+                "literal_exact": ["Clean entry", "Another clean one"],
+            }))
+            wl = load_whitelist(wl_path)
+        self.assertIn("Clean entry", wl["literal_exact"])
+        self.assertIn("Another clean one", wl["literal_exact"])
 
 
 class TestIsWhitelisted(unittest.TestCase):

@@ -17,6 +17,7 @@ Universal repack: 支持 macOS Mach-O 与 Linux ELF Bun standalone binary。
 import bisect
 import json
 import re
+import shutil
 import struct
 import subprocess
 import sys
@@ -723,12 +724,17 @@ def repack(input_bin: Path, output_bin: Path,
     Path(output_bin).write_bytes(new_binary)
     log.info(f"已写出 {output_bin} ({len(new_binary):,} 字节)")
 
-    # codesign for macOS
-    if fmt == "macho" and codesign:
+    # codesign for macOS: 仅在 codesign 可用时执行。codesign 是 macOS 专有工具,
+    # 非 macOS 的 CI runner (ubuntu) 上没有它; CI 只静态 verify 覆盖率、不运行 binary,
+    # 跳过签名无妨 (patched Mach-O 仍需在 macOS 上自行重签才能运行)。
+    if fmt == "macho" and codesign and shutil.which("codesign"):
         subprocess.run(["codesign", "--force", "--deep", "--sign", "-",
                         str(output_bin)], check=True)
         log.info(f"已 ad-hoc 签名")
     else:
+        if fmt == "macho" and codesign:
+            log.warning("codesign 不可用 (非 macOS), 跳过 ad-hoc 签名; "
+                        "patched Mach-O 需在 macOS 上重签才能运行")
         # 确保可执行
         Path(output_bin).chmod(0o755)
 
@@ -771,9 +777,18 @@ if __name__ == "__main__":
                         help="patch 前先跑 audit_replacements, 高风险时拒绝")
     parser.add_argument("--no-codesign", action="store_true",
                         help="跳过 macOS ad-hoc 重签 (仅在你后续手动签时)")
+    parser.add_argument("--assert-orig", action="store_true",
+                        help="patch 前断言输入 binary 的 orig cli.js sha256 命中 "
+                             "data/supported_versions.json 中某受支持版本; 不命中则 raise")
     args = parser.parse_args()
 
     inp, out, trans_path = args.input, args.output, args.translations
+
+    # --assert-orig: 确认操作的是已知 (受支持) 的原始 binary, 防止对未知/已改 binary 打 patch
+    if args.assert_orig:
+        import supported_versions as suppver
+        match = suppver.assert_orig_supported(Path(inp))
+        log.info(f"[assert-orig] OK: 输入命中受支持版本 {match[0]}/{match[1]}")
     from bun_format import platform_from_binary
     platform = platform_from_binary(Path(inp))
     trans = load_translations(trans_path, platform)

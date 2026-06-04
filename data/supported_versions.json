@@ -1,0 +1,15 @@
+{
+  "_comment": "受支持的 CC 版本及其原始 (pre-patch) cli.js sha256 (version×platform)。CI 仅对这些版本强制 verify=0; repack/install 前校 orig hash 确认是已知 binary。由 scripts/gen_supported_versions.py 生成。",
+  "versions": {
+    "2.1.152": {
+      "darwin-arm64": "f34e5a6ceea89421dfefec7a783cd9308c70c964db00e677e69012162df3ca0a",
+      "linux-x64": "980e21ba8f26ad5916e9fcd876c0eec6a4a815a92abb6799ae1c02e7a4008ed1",
+      "win32-x64": "9056bea8b85e35807c254bef7e1947efe5d0fa939c1777c7dabda61c288a60f8"
+    },
+    "2.1.161": {
+      "darwin-arm64": "d9a735f935c1a315d1844c54dfc5266ba8843ed7493f5e9642c79430d5abec77",
+      "linux-x64": "5c69e6263137282d21e53972a9830fc1dc40c566db670a6ba837dae559fc8533",
+      "win32-x64": "a9239f79fd462d06e25f4fd20e3dbd1ec55ea5331966bb137489d3a035a8f9ca"
+    }
+  }
+}

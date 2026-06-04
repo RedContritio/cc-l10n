@@ -63,10 +63,33 @@ STOP_WORDS = {
 }
 WORD_RE = re.compile(r"[A-Za-z']{2,}")
 SENTINEL_RE = re.compile(r"\$\{[\w.]+\}")
+# 句子标点 (句号/逗号/分号/冒号 后接空白或右括号): 散文有句子结构, 语言关键字表/
+# SYSRES 常量表/base64/正则 pattern 是无标点 token 流 -> 句子标点密度是强区分特征。
+SENT_PUNCT_RE = re.compile(r"[.,;:][ \n)]")
 URL_RE = re.compile(r"^https?://[\S]+$")
 PATH_RE = re.compile(r"^/?[A-Za-z0-9_\-./]+\.(?:ts|tsx|js|jsx|py|md|json|sh|toml)$")
 IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 CMD_RE = re.compile(r"^[a-z][a-z0-9\-]*(?: [a-z0-9\-./]+)*$")
+
+# minified-JS 残片 token (零误伤版, 见 scripts/diagnostic/test_minijs_penalty.py):
+# 真 prompt 不可能含 >=3 个这类 runtime token, 也不会以续接标点开头。
+MINI_JS_TOKENS = (
+    "N(`", "})}", "}),", ":!0", ":!1", "void 0", ".then(", ".push(", ".has(",
+    "catch(", "try{", "finally{", ",content:`", ",error:`", ",note:`",
+    ",reason:`", ",request_id:", ":return`", "Date.now()", "Array.isArray",
+    ".uuid", "){let ", "){if(", "];if(", ");if(", ")}if(", "})),", "=>{", "=>(",
+    ",identity:", ",properties:", ",profiles:", ",subtitle:", ",tool_use_id:",
+    ",source:", ",worktree:", ",attempts:", ",dryRun:", ",maxResultSizeChars",
+    "QBH()", "].push(", ",{cwd:", ".rm(", ".unlink(", ".dispose()",
+    ",instructions:[", ",command:", ",errorDescription:", ".at(-1)",
+    ".number()", ".optional()", ".min(", ".format()", "}:{error:", ",K6=",
+    "=ZH(", ",_)(", "?`${", ".apiBaseUrl", ".pluginId", ",changed_files:",
+    "=O.", ".whats_work", "this.version", "this.format",
+)
+# 仅这 8 个【续接/闭合标点】作 lead 触发: 字面量以它们开头 = 极可能是 minified JS
+# 拼接残尾 (前一表达式的尾 + 本片段)。刻意【排除】 [ ( { . = 等: markdown 列表 "- "、
+# 括号引导、方法链说明、配置 "key = val" 都是合法 prompt 散文会以它们起首, 纳入会全面误伤。
+MINI_JS_LEAD = set("&),;?:]}")
 
 
 def score_text(text: str) -> tuple[int, list[str]]:
@@ -146,6 +169,18 @@ def score_text(text: str) -> tuple[int, list[str]]:
         score += 3
         evidence.append("desc_verb_lead")
 
+    # 散文结构启发式: 长文本 + stop_words 密集 + 句子标点密集 = 自然语言散文 prompt。
+    # 主 system prompt 行为指令 / 各场景 prompt / tool·setting·agent 描述这类散文常
+    # 缺 markdown 标题 / "You are" / IMPORTANT: 等强信号, 仅靠 stop_words+长度 停在 4 分
+    # (< prompt 阈值 5), 导致 class=weak 静默漏译。句子标点密度把它们与语言关键字表 /
+    # SYSRES 常量 / base64 / 正则等无标点 token 流区分开 (后者密度 ~0)。
+    sentence_punct = len(SENT_PUNCT_RE.findall(text))
+    prose_density = sentence_punct / max(len(words), 1)
+    if (n >= 160 and stop_count >= 8
+            and sentence_punct >= 6 and prose_density >= 0.045):
+        score += 2
+        evidence.append("prose_structure")
+
     # 排除明显不是 prompt 的形态
     stripped = text.strip()
     if URL_RE.match(stripped):
@@ -193,6 +228,17 @@ def score_text(text: str) -> tuple[int, list[str]]:
                     stripped):
             evidence.append("js_punct_lead")
             score -= 5
+
+    # minified-JS 残片 penalty (零误伤版, 见 scripts/diagnostic/test_minijs_penalty.py):
+    # mj>=3 (prompt 不可能含 3 个 runtime token) 或 (续接标点开头 且 mj>=1 且非 imperative
+    # 指令)。补 js_markers/js_punct_lead 之外的细碎 minified token (`})}` / `,reason:` /
+    # `.then(` 等), 收掉残存 score>=5 的 JS 假候选。对真散文 prompt 结构安全 (不以 &),;?:]}
+    # 开头, 不含 3 个 runtime token)。
+    mj = sum(1 for p in MINI_JS_TOKENS if p in text)
+    mj_lead = bool(stripped) and stripped[0] in MINI_JS_LEAD
+    if mj >= 3 or (mj_lead and mj >= 1 and "imperative_marker" not in evidence):
+        evidence.append(f"minified_js={mj}")
+        score -= 8
 
     # 第三方 SDK runtime 字符串 (Azure / AWS / OAuth 错误等)
     sdk_markers = sum(1 for pat in [
@@ -286,6 +332,37 @@ def collect_array_groups(cli: bytes, ranges: list[tuple[int, int, str]]) -> dict
     return out
 
 
+def collect_template_groups(cli: bytes,
+                            ranges: list[tuple[int, int, str]]) -> dict[int, int]:
+    """识别同一 template literal 的相邻 tmpl_frag (间隔恰为一段 ${...} 插值).
+
+    scan_template 把 `A${x}B` 切成 tmpl_frag "A"/"B", 二者之间 cli[e1:s2] 正好是
+    `${...}` (以 ${ 开头, } 结尾, 中间无反引号 — 反引号意味着跨模板边界或嵌套模板)。
+    返回 dict: frag_offset -> root_index (同一模板的 frag 共享 root, union-find)。
+    """
+    n = len(ranges)
+    parent = list(range(n))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for i in range(n - 1):
+        s1, e1, t1 = ranges[i]
+        s2, e2, t2 = ranges[i + 1]
+        if t1 != "tmpl_frag" or t2 != "tmpl_frag":
+            continue
+        gap = cli[e1:s2]
+        if gap.startswith(b"${") and gap.endswith(b"}") and b"`" not in gap:
+            ri, rj = find(i), find(i + 1)
+            if ri != rj:
+                parent[ri] = rj
+
+    return {ranges[i][0]: find(i) for i in range(n)}
+
+
 def classify_literal(text: str, offset: int, group_size: int,
                      min_score: int) -> tuple[str, int, list[str]]:
     """
@@ -327,15 +404,29 @@ def load_whitelist(path: Path) -> dict:
     """返回 dict: {exact, regex, literal_exact}.
 
     literal_exact 用 set + frozenset 加速完整字面量匹配.
+
+    契约: literal_exact 条目必须已 strip 存储. is_whitelisted 用
+    ``text.strip() in literal_exact`` 比较, 带外层空白 (前/后导 \\n / 空格)
+    的条目永远无法命中 = 静默死条目. 此处强制 raise 让缺陷可见, 不静默纠正
+    (auto-strip 会掩盖数据缺陷).
     """
     raw = json.loads(path.read_text())
+    literal_raw = [
+        s for s in raw.get("literal_exact", [])
+        if isinstance(s, str) and not s.startswith("_comment")
+    ]
+    padded = [s for s in literal_raw if s != s.strip()]
+    if padded:
+        sample = padded[0]
+        raise ValueError(
+            f"whitelist literal_exact 含 {len(padded)} 条带外层空白的死条目 "
+            f"(is_whitelisted 用 strip 比较, 永不命中): 首条 repr_head={sample[:40]!r}. "
+            f"请在 {path} 中 strip 这些条目后重试."
+        )
     return {
         "exact": [s for s in raw.get("exact", []) if isinstance(s, str) and not s.startswith("_comment")],
         "regex": [re.compile(p) for p in raw.get("regex", []) if not p.startswith("_comment")],
-        "literal_exact": frozenset(
-            s for s in raw.get("literal_exact", [])
-            if isinstance(s, str) and not s.startswith("_comment")
-        ),
+        "literal_exact": frozenset(literal_raw),
     }
 
 
@@ -393,6 +484,32 @@ def main():
     for gid in groups.values():
         group_sizes[gid] = group_sizes.get(gid, 0) + 1
 
+    # 3a 结构感知 (中英混合模板检测, 报告信号): 同一 template literal 的相邻 tmpl_frag,
+    # 若整组【同时含中文 frag 与英文实质 frag】= 很可能是正在被翻译但残留英文的描述/
+    # skill 文档 (项目要消灭的中英混合)。这是【报告/警告】信号, 不进 strict 硬门 ——
+    # 因为这类模板里残留的英文既有该译的散文, 也有该留英文的代码示例 (Promise.all() /
+    # JSON / shell), 无启发式可干净区分, 强制 gate 会逼着把代码也译/whitelist。
+    # 实测: 纯评分重组判据 flood 1813 假阳性 (全英文 HTML/shell/doc 模板), 故弃用;
+    # 限定到"含中文的混合模板"后降到 ~233, 但仍混代码碎片, 适合人工三审而非自动门。
+    log.info(f"识别 template literal 分组 (3a 中英混合检测) ...")
+    tmpl_groups = collect_template_groups(cli, ranges)
+    range_by_offset = {r[0]: r for r in ranges}
+    tmpl_members: dict[int, list[tuple[int, int, str]]] = {}
+    for off, root in tmpl_groups.items():
+        tmpl_members.setdefault(root, []).append(range_by_offset[off])
+    mixed_template_offsets: set[int] = set()
+    for root, members in tmpl_members.items():
+        if len(members) < 2:
+            continue
+        decoded = [(s, decode_literal(cli, s, e, lt)) for s, e, lt in members]
+        has_cn = any(t and CN_RE.search(t) for _, t in decoded)
+        if not has_cn:
+            continue  # 全英文模板 = 代码串, 不碰
+        for s, t in decoded:
+            if t and not CN_RE.search(t) and len(t.strip()) >= 8 and WORD_RE.search(t):
+                mixed_template_offsets.add(s)
+    log.info(f"  中英混合模板残留英文片段 (报告信号): {len(mixed_template_offsets)}")
+
     trans_keys: set[str] = set()
     if args.translations:
         trans_keys = load_translations_keys(Path(args.translations), platform)
@@ -416,7 +533,9 @@ def main():
         "whitelisted": 0,
         "untranslated_prompt": 0,
         "untranslated_weak": 0,
+        "mixed_lang_template_residual": 0,
     }
+    mixed_lang_samples: list[str] = []
 
     # 用于覆盖率: 把 trans_keys 转成 bytes 集合, 还要考虑 sentinel 形态
     # trans_keys 是原始 JSON key (含 ${__SENTINEL__}), 需要拿 cli 中真实变量名来 materialize
@@ -479,6 +598,8 @@ def main():
         gid = groups.get(start, f"g_solo_{start}")
         gsize = group_sizes.get(gid, 1)
         cls, score, ev = classify_literal(text, start, gsize, args.min_score)
+        if start in mixed_template_offsets:
+            ev.append("mixed_lang_template")
         if cls == "skip":
             stats["scored_skip"] += 1
             continue
@@ -521,6 +642,11 @@ def main():
                 stats["untranslated_prompt"] += 1
             else:
                 stats["untranslated_weak"] += 1
+            # 报告信号 (不进 strict 门): 中英混合模板里残留且未覆盖的英文实质片段
+            if start in mixed_template_offsets:
+                stats["mixed_lang_template_residual"] += 1
+                if len(mixed_lang_samples) < 40:
+                    mixed_lang_samples.append(text)
 
         entry = {
             "offset": start,
@@ -544,6 +670,7 @@ def main():
         "source": str(src_path),
         "cli_js_size": len(cli),
         "summary": stats,
+        "mixed_lang_template_samples": mixed_lang_samples,
         "candidates": candidates,
     }
 
@@ -554,6 +681,14 @@ def main():
     log.info(f"\n=== 摘要 ===")
     for k, v in stats.items():
         log.info(f"  {k:<28} {v:>6}")
+
+    # 报告信号 (warning, 不进 strict 门): 中英混合模板残留英文片段, 供人工三审
+    if stats["mixed_lang_template_residual"] > 0:
+        log.warning(f"\n[WARN] 中英混合模板残留英文片段: {stats['mixed_lang_template_residual']} "
+                    f"(报告信号, 不计入 strict; 需人工区分该译散文 vs 该留代码示例)")
+        for t in mixed_lang_samples[:min(args.show, len(mixed_lang_samples))]:
+            preview = t.strip()[:args.show_context].replace("\n", "\\n")
+            log.warning(f"    {preview!r}")
 
     # 打印未翻译的前 N 条
     untrans = [c for c in candidates
