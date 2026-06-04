@@ -777,9 +777,18 @@ if __name__ == "__main__":
                         help="patch 前先跑 audit_replacements, 高风险时拒绝")
     parser.add_argument("--no-codesign", action="store_true",
                         help="跳过 macOS ad-hoc 重签 (仅在你后续手动签时)")
+    parser.add_argument("--assert-orig", action="store_true",
+                        help="patch 前断言输入 binary 的 orig cli.js sha256 命中 "
+                             "data/supported_versions.json 中某受支持版本; 不命中则 raise")
     args = parser.parse_args()
 
     inp, out, trans_path = args.input, args.output, args.translations
+
+    # --assert-orig: 确认操作的是已知 (受支持) 的原始 binary, 防止对未知/已改 binary 打 patch
+    if args.assert_orig:
+        import supported_versions as suppver
+        match = suppver.assert_orig_supported(Path(inp))
+        log.info(f"[assert-orig] OK: 输入命中受支持版本 {match[0]}/{match[1]}")
     from bun_format import platform_from_binary
     platform = platform_from_binary(Path(inp))
     trans = load_translations(trans_path, platform)

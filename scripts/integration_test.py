@@ -42,6 +42,7 @@ PROJECT_ROOT = SCRIPT_DIR.parent
 sys.path.insert(0, str(SCRIPT_DIR))
 
 from log_setup import setup_logging  # noqa: E402
+import supported_versions as suppver  # noqa: E402
 
 log = setup_logging("integration_test")
 
@@ -159,23 +160,6 @@ def fetch_binary(version: str, platform_pkg: str = PLATFORM_PKG) -> Path:
     return binary_path
 
 
-def _ver_key(v: str) -> tuple:
-    try:
-        return tuple(int(x) for x in v.split("."))
-    except ValueError:
-        return (0,)
-
-
-def coverage_versions(versions: list[str]) -> set[str]:
-    """每 minor 的最新 patch 需 verify=0 (全覆盖); 过渡 patch 只验流水线鲁棒 (B 语义)."""
-    best: dict[str, str] = {}
-    for v in versions:
-        m = ".".join(v.split(".")[:2])
-        if m not in best or _ver_key(v) > _ver_key(best[m]):
-            best[m] = v
-    return set(best.values())
-
-
 def run_pipeline(binary: Path, require_coverage: bool) -> tuple[bool, str]:
     """B 语义: repack --strict (流水线鲁棒: skip=0/placeholder=0) 对所有版本;
     coverage-required 版再 verify (untranslated_prompt=0). 平台由 binary 自动判。"""
@@ -256,7 +240,11 @@ def main() -> int:
     ap.add_argument("--versions-csv", default=None,
                     help="逗号分隔版本列表 (CI 输入用; 优先级高于 --version 和 --all)")
     ap.add_argument("--dist-tags", action="store_true",
-                    help="只跑 npm dist-tags 的 latest+stable 版 (快速 CI 默认; 全要 verify=0)")
+                    help="只跑 npm dist-tags 的 latest+stable 版 (全要 verify=0)")
+    ap.add_argument("--supported", action="store_true",
+                    help="PR 门 (推荐): 版本集 = data/supported_versions.json 声明的受支持版本 "
+                         "(与 npm dist-tags 解耦); 逐版本×平台先校 orig cli.js sha256 == 配置, "
+                         "再 repack+verify=0")
     ap.add_argument("--all", action="store_true",
                     help="跑 npm 上所有版本 (慢; 默认: 抽样策略)")
     ap.add_argument("--check-stale", action="store_true",
@@ -279,8 +267,15 @@ def main() -> int:
 
     # explicit_targets: 用户显式点名/dist-tag 的版本 = 真实发布目标, 全要 verify=0;
     # 抽样/--all 走 B 语义 (每 minor 最新才全覆盖, 过渡 patch 仅流水线鲁棒)。
+    # 配置 = "哪些版本要 verify=0" 的唯一真相, 总是加载 (各模式据此 gate 覆盖要求)。
+    supported_cfg = suppver.load_config()
+    supported_set = set(suppver.supported_versions(supported_cfg))
+
     explicit_targets = False
-    if args.versions_csv:
+    if args.supported:
+        versions = sorted(supported_set, key=parse_version)
+        explicit_targets = True  # 受支持版本都是发布目标, 全要 verify=0
+    elif args.versions_csv:
         versions = [v.strip() for v in args.versions_csv.split(",") if v.strip()]
         explicit_targets = True
     elif args.version:
@@ -323,14 +318,17 @@ def main() -> int:
             log.info(f"  运行集补齐 supported 缺失版本: {sorted(missing, key=parse_version)}")
             versions = sorted(set(versions) | supported, key=parse_version)
 
-    cov_versions = set(versions) if explicit_targets else coverage_versions(versions)
-    if args.check_stale:
-        cov_versions |= supported  # 受支持版本是发布目标, 全要 verify=0
+    # verify=0 真相 = data/supported_versions.json (决策 A: 配置解耦 dist-tags)。
+    #   显式点名 (--supported/--version/--versions-csv/--dist-tags): 点到的都要 verify=0;
+    #   抽样/--all: 仅【受支持版本】要 verify=0 (新版本 latest 不在配置则只验流水线鲁棒,
+    #   不被动变红 —— 治本 npm 跳 latest→CI 红)。no-stale 的 supported 范围只管 stale 判定,
+    #   不再当 verify=0 目标。
+    cov_versions = set(versions) if explicit_targets else (set(versions) & supported_set)
 
     log.info(f"将跑 {len(versions)} 版 × {len(platforms)} 平台 (B 语义)")
     log.info(f"  版本: {versions}")
     log.info(f"  平台: {[p.split('/')[-1] for p in platforms]}")
-    log.info(f"  需全覆盖 (每 minor 最新, verify=0): {sorted(cov_versions)}")
+    log.info(f"  需 verify=0 (受支持版本): {sorted(cov_versions)}")
     log.info(f"  其余: 仅验流水线鲁棒 (apply 成功/skip=0); cache: {CACHE_DIR}")
 
     # 聚合 no-stale 用: 所有 translation key + whitelist src, 跨所有 binary 累计命中
@@ -361,6 +359,21 @@ def main() -> int:
                 log.error(f"[FAIL] {label}: fetch error: {e}")
                 failed.append(label)
                 continue
+            if supported_cfg is not None:
+                pk = suppver.platform_key(pkg)
+                want = suppver.expected_hash(supported_cfg, v, pk)
+                got = suppver.cli_js_sha256(binary)
+                if want is None:
+                    log.error(f"[FAIL] {label}: 配置缺 {v}/{pk} 的 orig hash "
+                              f"(运行 gen_supported_versions.py 补录)")
+                    failed.append(label)
+                    continue
+                if got != want:
+                    log.error(f"[FAIL] {label}: orig cli.js sha256 漂移 "
+                              f"(配置 {want[:16]}… != 实测 {got[:16]}…); "
+                              f"CC 升级或下载损坏, 译文未对该 binary 构建")
+                    failed.append(label)
+                    continue
             ok, err = run_pipeline(binary, require_coverage=(v in cov_versions))
             if ok:
                 log.info(f"[OK] {label}" + (" (full coverage)" if v in cov_versions else " (pipeline)"))

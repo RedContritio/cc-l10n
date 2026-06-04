@@ -104,11 +104,26 @@ def find_active_binary() -> Path:
     return find_active_binary_unix()
 
 
-def install(binary: Path) -> None:
+def install(binary: Path, force: bool = False) -> None:
     log.info(f"active binary : {binary}")
 
     backup = binary.with_suffix(binary.suffix + ".orig" if binary.suffix else ".orig")
     zh = binary.with_suffix(binary.suffix + ".zh" if binary.suffix else ".zh")
+
+    # 受支持版本断言: 取 pristine 源 (已存在备份 = 原版, 否则当前 binary 即将被备份),
+    # 算 orig cli.js sha256, 必须命中某受支持版本; 否则拒装 (译文未对该版构建, 强装可能
+    # 破坏英文锚点等)。--force 可绕过 (自担风险)。
+    import supported_versions as suppver
+    pristine = backup if backup.exists() else binary
+    try:
+        match = suppver.assert_orig_supported(pristine, force=force)
+    except ValueError as e:
+        log.error(f"[FAIL] 版本断言: {e}")
+        sys.exit(3)
+    if match is not None:
+        log.info(f"[OK] 版本断言: {pristine.name} 命中受支持版本 {match[0]}/{match[1]}")
+    else:
+        log.warning("[WARN] --force: orig cli.js 未命中任何受支持版本, 仍继续 (自担风险)")
 
     log.info(f"备份目标       : {backup}")
     log.info(f"中文版输出     : {zh}\n")
@@ -165,6 +180,8 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--binary", default=None,
                     help="显式指定 active CC binary 路径")
+    ap.add_argument("--force", action="store_true",
+                    help="绕过受支持版本断言, 对未在 supported_versions.json 的 binary 强行安装 (自担风险)")
     args = ap.parse_args()
 
     if args.binary:
@@ -179,7 +196,7 @@ def main():
             log.error(f"[FAIL] {e}")
             sys.exit(1)
 
-    install(binary)
+    install(binary, force=args.force)
 
 
 if __name__ == "__main__":

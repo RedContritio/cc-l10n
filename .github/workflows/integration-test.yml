@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       versions:
-        description: '逗号分隔版本号 (空=dist-tags latest+stable)'
+        description: '逗号分隔版本号 (空=--supported 受支持版本集)'
         required: false
         default: ''
       all_versions:
@@ -25,9 +25,10 @@ on:
 # 单 job, 一个进程内跑目标版本 × 三平台 (linux/win/mac)。平台子包仅 2.1.110+ 才有,
 # 缺失组合走 404-skip。覆盖率 (verify untranslated_prompt=0) 是硬门。
 # 触发分流 (见 resolve step):
-#   - push/默认 dispatch: --dist-tags (latest+stable) 快速门, 不开 --check-stale
-#     (窄集会把跨版本维护变体误判 stale, 见 #4)。
-#   - schedule (每周): 抽样 (更广) + --check-stale, 对整个运行集判真 stale (死译文清理信号)。
+#   - push/默认 dispatch: --supported (data/supported_versions.json 声明的受支持版本,
+#     与 npm dist-tags 解耦) 快速门 + orig hash 断言, 不开 --check-stale。
+#   - schedule (每周): 抽样 (更广) + --check-stale, 对整个运行集判真 stale (死译文清理信号);
+#     verify=0 仅对受支持版本 (新版 latest 不在配置则只验流水线鲁棒, 不被动变红)。
 #   - 手动 dispatch 可经 check_stale 输入显式开门; all_versions=true 跑全历史。
 jobs:
   test:
@@ -53,7 +54,7 @@ jobs:
           elif [ -n "${{ inputs.versions }}" ]; then
             mode="--versions-csv ${{ inputs.versions }}"
           else
-            mode="--dist-tags"
+            mode="--supported"
           fi
           if [ "${{ inputs.check_stale }}" = "true" ]; then extra="--check-stale"; fi
           echo "mode=$mode" >> $GITHUB_OUTPUT
