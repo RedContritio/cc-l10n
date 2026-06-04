@@ -17,6 +17,8 @@ import re
 import sys
 from pathlib import Path
 
+from analyze_common import extract_project_name
+
 
 # ── char classification ──────────────────────────────────────────────
 
@@ -180,14 +182,7 @@ def analyze_one(path):
         thirds_en.append(ta / tt if tt > 0 else 0)
 
     # Extract project name from path
-    parts = str(path).split("/")
-    project = ""
-    for p in parts:
-        if p.startswith("-Users-"):
-            # CC 把项目目录名编码为 -Users-<user>-Projects-<proj> (或 -Users-<user>-<rest>)
-            project = re.sub(r"^-Users-[^-]+-Projects-", "", p)
-            project = re.sub(r"^-Users-[^-]+-", "~", project)
-            break
+    project = extract_project_name(path)
 
     session_id = Path(path).stem
 

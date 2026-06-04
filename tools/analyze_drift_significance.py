@@ -193,7 +193,10 @@ def binomial_p(k, n, p0=0.5):
 
 def wilcoxon_signed_rank(values):
     """Wilcoxon signed-rank test: are values systematically > 0?
-    Returns (W+, z, p_value)."""
+    Returns (W+, z, p_value).
+
+    正态近似, 无连续性修正 (z 未减 0.5), 对小样本轻微 anti-conservative;
+    p<0.0001 量级可忽略。与 analyze_drift_runs.py 同名函数行为一致。"""
     # Remove zeros
     nonzero = [(abs(v), 1 if v > 0 else -1) for v in values if v != 0]
     n = len(nonzero)

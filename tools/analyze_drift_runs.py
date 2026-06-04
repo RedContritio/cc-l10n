@@ -25,6 +25,8 @@ import random
 from collections import defaultdict
 from pathlib import Path
 
+from analyze_common import extract_project_name
+
 
 def is_cjk(ch):
     cp = ord(ch)
@@ -179,6 +181,12 @@ def binomial_p(k, n, p0=0.5):
 
 
 def wilcoxon_signed_rank(values):
+    """单尾 Wilcoxon signed-rank (正态近似, 无连续性修正).
+
+    z=(W+-mu)/sigma 未减 0.5 连续性修正, 对小样本轻微 anti-conservative (p 偏小约
+    几个百分点); p<0.0001 量级宣告时可忽略, p~0.05 边界判定需补修正。与
+    analyze_drift_significance.py 同名函数保持一致行为。
+    """
     nonzero = [(abs(v), 1 if v > 0 else -1) for v in values if v != 0]
     n = len(nonzero)
     if n < 5:
@@ -398,7 +406,7 @@ def main():
     n = len(msgs)
     per_msg = analyze_conversation(msgs)
 
-    proj = re.sub(r"^-Users-[^-]+-Projects-", "", Path(path).parent.name)
+    proj = extract_project_name(path)
     sid = Path(path).stem[:12]
     print(f"=== Example: {proj} / {sid} ({n} msgs) ===")
     print(f"{'#':<6} {'CJK wrun':<12} {'ASC wrun':<12} {'Max CJK':<10} {'CJK ratio':<10} {'Preview'}")
