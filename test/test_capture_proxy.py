@@ -124,6 +124,12 @@ def test_schema_valid():
     assert check_against_schema("Bash", {"command": "ls", "timeout": 5, "mode": "a"}, _SCHEMA) == []
 
 
+def test_schema_extra_field_allowed_when_additional_properties_true():
+    # additionalProperties 未显式禁止 (默认 True) 时, 额外字段不是违例 (JSON Schema 语义)
+    schema = {"type": "object", "properties": {"command": {"type": "string"}}}
+    assert check_against_schema("Bash", {"command": "ls", "env": {"X": "1"}}, schema) == []
+
+
 # ---------- detect_retry_in_request ----------
 
 def test_detect_retry_extracts_prev_assistant():
@@ -140,6 +146,22 @@ def test_detect_retry_extracts_prev_assistant():
 
 def test_detect_retry_absent():
     body = {"messages": [{"role": "user", "content": "hello"}]}
+    assert detect_retry_in_request(body) is None
+
+
+def test_detect_retry_no_false_positive_on_user_quote():
+    # 用户只是引用/讨论该串 (非 CC 注入的纯重试串) → 不应误报 (完全等值匹配)
+    body = {"messages": [
+        {"role": "user", "content": f"My tool failed with: '{RETRY_MARKER}'. How do I fix this?"},
+    ]}
+    assert detect_retry_in_request(body) is None
+
+
+def test_detect_retry_ignores_assistant_mentioning_marker():
+    # assistant 消息提到该串 (讨论) 不是重试信号
+    body = {"messages": [
+        {"role": "assistant", "content": f"I will avoid: {RETRY_MARKER}"},
+    ]}
     assert detect_retry_in_request(body) is None
 
 

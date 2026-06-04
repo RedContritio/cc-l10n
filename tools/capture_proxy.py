@@ -17,7 +17,9 @@
           => 上一轮 assistant tool_use 被判畸形 (CC 自己的 ground-truth 判定)
       (2) 响应 stop_reason=="tool_use" 但 tool_use 块缺失 / input JSON 解析失败
 
-落盘格式: 每行一条 JSON, 字段见 _log_record. x-api-key / authorization 一律脱敏.
+落盘格式: 每行一条 JSON, 字段见 _record. 仅请求头脱敏 (x-api-key / authorization);
+  req_body (system / tools / messages 全文) 与 resp_sse_raw (完整模型输出) 不脱敏、原样落盘,
+  含完整会话内容, 高度敏感 —— 故 .capture/ 必须 gitignore, 切勿提交或外传.
 
 用法
   python3 tools/capture_proxy.py [--port 18889] [--upstream https://api.anthropic.com]
@@ -68,40 +70,50 @@ def _redact_headers(headers) -> dict:
     return out
 
 
-def _iter_message_text(messages):
-    """yield 每条 message 的 (role, 文本拼接) —— content 可能是 str 或 block 列表."""
-    for m in messages or []:
-        role = m.get("role", "")
-        c = m.get("content", "")
-        if isinstance(c, str):
-            yield role, c
-        elif isinstance(c, list):
-            parts = []
-            for b in c:
-                if isinstance(b, dict):
-                    if b.get("type") == "text":
-                        parts.append(b.get("text", ""))
-                    elif b.get("type") == "tool_result":
-                        tc = b.get("content", "")
-                        parts.append(tc if isinstance(tc, str) else json.dumps(tc, ensure_ascii=False))
-            yield role, "\n".join(parts)
+def _message_is_retry_marker(m) -> bool:
+    """该 user message 的内容是否【就是】CC 注入的重试串本身.
+
+    用完全等值 (而非子串) 匹配, 排除用户/assistant 仅仅引用或讨论该串的误报 ——
+    与 parse_monitor detect 的结构谓词同思路。content 可能是 str 或 block 列表
+    (text / tool_result)。"""
+    c = m.get("content", "")
+    if isinstance(c, str):
+        return c.strip() == RETRY_MARKER
+    if isinstance(c, list):
+        for b in c:
+            if not isinstance(b, dict):
+                continue
+            if b.get("type") == "text" and (b.get("text") or "").strip() == RETRY_MARKER:
+                return True
+            if b.get("type") == "tool_result":
+                tc = b.get("content", "")
+                if isinstance(tc, str) and tc.strip() == RETRY_MARKER:
+                    return True
+    return False
 
 
 def detect_retry_in_request(body_obj) -> dict | None:
-    """请求 messages 里若含重试串, 返回 {prev_assistant: <上一条 assistant message>}."""
+    """请求 messages 里若 CC 注入了重试串 (role=user 且内容完全等于该串),
+    返回 {retry_index, prev_assistant}; 否则 None.
+
+    完全等值匹配排除"对话里引用/讨论该串"的误报 (此前子串匹配会对用户提问里
+    引用该串误报; 仅影响日志标记不影响转发, 但仍应消除)。"""
     if not isinstance(body_obj, dict):
         return None
     messages = body_obj.get("messages")
     if not isinstance(messages, list):
         return None
-    for i, (role, text) in enumerate(_iter_message_text(messages)):
-        if RETRY_MARKER in text:
-            prev_assistant = None
-            for j in range(i - 1, -1, -1):
-                if messages[j].get("role") == "assistant":
-                    prev_assistant = messages[j]
-                    break
-            return {"retry_index": i, "prev_assistant": prev_assistant}
+    for i, m in enumerate(messages):
+        if not isinstance(m, dict) or m.get("role") != "user":
+            continue
+        if not _message_is_retry_marker(m):
+            continue
+        prev_assistant = None
+        for j in range(i - 1, -1, -1):
+            if messages[j].get("role") == "assistant":
+                prev_assistant = messages[j]
+                break
+        return {"retry_index": i, "prev_assistant": prev_assistant}
     return None
 
 

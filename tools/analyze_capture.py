@@ -49,8 +49,8 @@ def check_against_schema(name, inp, schema) -> list[str]:
             issues.append(f"缺 required 字段: {r!r}")
     addl = schema.get("additionalProperties", True)
     for k in inp:
-        if k not in props:
-            issues.append(f"多余字段: {k!r}" + ("" if addl is not False else " (schema 禁止 additionalProperties)"))
+        if k not in props and addl is False:
+            issues.append(f"多余字段: {k!r} (schema 禁止 additionalProperties)")
     _JSON_T = {"string": str, "number": (int, float), "integer": int,
                "boolean": bool, "array": list, "object": dict}
     for k, v in inp.items():
