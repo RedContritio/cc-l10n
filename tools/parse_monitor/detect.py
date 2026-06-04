@@ -29,6 +29,7 @@ def _fenced_spans(text: str) -> list:
 
     未闭合的 ``` 视为延伸到文本末尾。用于判断逃逸 opener 是否落在代码块内 (贴原文)。
     """
+    n = len(text)
     spans = []
     offset = 0
     open_at = None
@@ -37,13 +38,13 @@ def _fenced_spans(text: str) -> list:
         line_end = offset + len(line)
         if line.lstrip().startswith("```"):
             if open_at is None:
-                open_at = line_end + 1   # 内容从围栏行的下一行起
+                open_at = min(line_end + 1, n)   # 内容从围栏行下一行起; clamp 防末尾裸围栏越界
             else:
                 spans.append((open_at, line_start))
                 open_at = None
-        offset = line_end + 1            # +1 跨过 \n
-    if open_at is not None:
-        spans.append((open_at, len(text)))
+        offset = line_end + 1                    # +1 跨过 \n
+    if open_at is not None and open_at < n:      # 未闭合且确有内容才记 (排除末尾空围栏的倒置区间)
+        spans.append((open_at, n))
     return spans
 
 

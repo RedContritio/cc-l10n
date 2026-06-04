@@ -172,6 +172,14 @@ def test_silent_no_false_positive_on_fenced_with_blank_line():
     assert classify_record(rec) is None
 
 
+def test_fenced_spans_never_inverted():
+    # 末尾无换行的孤立围栏不产生倒置区间 (s>e); 零行为变化, 仅消除畸形内部状态
+    from parse_monitor.detect import _fenced_spans
+    for t in ("", "```", "X\n```", "\n```", "a\n```\nb\n```"):
+        for s, e in _fenced_spans(t):
+            assert s <= e, (t, s, e)
+
+
 # ---------- [detect] 健壮性 ----------
 
 def test_empty_record_returns_none():
