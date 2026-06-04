@@ -86,3 +86,47 @@ STATIC `verify`(检 `untranslated_prompt`),**不跑 apply 的 hit-overlap audit*
 - 做法:`--supported` 门对每个 version × platform 增跑一次 `apply`(或独立 audit strict),
   使 risk A–E 高危在 PR 阶段即暴露,而非到 install 才发现。
 - 关联第 6 项(CI 广度)。
+
+## 11. parse-monitor 实现 / 文档对齐(两轮对抗评审剩余,均 minor)
+
+诊断工具线。两轮对抗评审(2026-06-05)对 `tools/parse_monitor/` 的发现;唯一 important
+(静默文本化逃逸检测)已修(commit 2078c37,真环境 243K 行零误报)。剩余经第二层验证全部
+降为 minor,待后续:
+
+- 3b:incident `first_line`/`last_line` 实为本批起始字节偏移而非行号(生产前 23 条为 0,
+  `watcher.py:66` 传 `off` / `incident.py:60-61`)。改 `read_new_lines`/`scan_once` 传该记录
+  精确字节偏移并字段改名 `byteOffset`(或维护真行号),补断言测试。
+- 3c:历史事件(早于 `binary_state` 时间线起点)无 patch 归因(生产 57.5% 缺 `patched`);
+  `DESIGN.md:61` 承诺的 mtime 回退未实现。实现 binary mtime 反推,或删该承诺改坦承不可归因。
+- 3d:probe 判据论述错 —— 真二进制 patched 态 src/dst 共存(英文串在 Bun 元数据区有残留
+  拷贝),"含源串→unpatched" 是伪命题(对外契约 `patched=n_dst>0` 仍正确、无功能 bug)。改
+  docstring/DESIGN 判据只依赖 `n_dst`;探针从 `data/translations` 动态加载或加启动自检
+  (现硬编码 3 条译串,译表改措辞会误判 patched→unpatched);real-env 校验脚本改用真 Bun
+  二进制(现验的是解码后单段 cli.js,与运行行为不一致)。
+- 3e:归并只用 promptId 继承,`DESIGN.md:34` 声称的 parentUuid 链未实现(事件交错时可错并,
+  现实罕见)。实现链回溯,或 DESIGN 改"promptId 近似归并"标 known-limitation。
+- 3f:SOFT/HARD marker 串在 `capture_proxy.py` / `parse_monitor/detect.py` / 测试里各硬编码
+  一份,无单一来源。提到共享常量模块。
+- 3g:DESIGN/README 对齐实现 —— 声明 SILENT 检测为 best-effort(仅已知损坏 opener 形态,
+  可能漏报新形态),SOFT/HARD 为可靠零误报核心;并修正上述 probe/mtime/parentUuid 的表述。
+
+## 12. 语言漂移文档统计严谨性修订(对抗评审发现)
+
+研究/文档线。`docs/language-drift-analysis.md` 是面向公众的项目 Why 论证,drift-doc
+reviewer(2026-06-05)发现的统计严谨性问题,公开发布前应修:
+
+- **(important)** between-within 分解无法区分"任务阶段跳变"与"持续线性漂移"(模拟证实纯
+  线性漂移也使两者都显著;`analyze_within_phase.py:154` between=段末−段首均值,等于 within
+  斜率对段距的积分,无额外信息)。"三法排除任务阶段假说"被过度声称,实为"两法 + 一个无
+  区分力的分解"。改措辞或用残差法重定义 between。剩余三条独立证据线仍支持核心结论。
+- 约 26 个假设检验无多重比较校正(段内 2nd-segment p=0.0225 不过 Bonferroni 阈值 ~0.0019)。
+  方法论节补说明哪些结论校正后仍成立(核心 mean_cjk/asc_wrun 全局检验 p<0.0001 稳健)。
+- 长度分层表静默省略了不显著的 20-49 桶(N=12,67% 负斜率,p=0.19),破坏"随长度单调增强"
+  叙事。补该行或注明省略原因。
+- 数字过时(数据集 78→84):200+ 组文档写 100% 实为 90%;用户对照 p=0.20→0.084;段内 3rd
+  p=0.042→0.134(已不显著);200+ Sign p=0.002→0.013。重跑脚本更新,"完全没随对话变化"等
+  强表述降级。
+- "四轮独立审查"由同模型家族(Opus 4.8)执行 = 循环依赖,"82% 置信度"是 AI 主观判断而非
+  统计量。改"对抗性自审(Opus 4.8 作批评方)"+ 注明非独立第三方评审 / 非统计置信区间。
+- "所有 p 值为单尾"与 Mann-Kendall 实际用双尾(`analyze_drift_significance.py:151`)矛盾。
+  区分说明(Sign/Wilcoxon 单尾;MK 双尾,仅用于对话内趋势计数)。
