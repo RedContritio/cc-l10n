@@ -1,30 +1,532 @@
 {
-  "_comment": "术语一致性表 (用户铁律: 每个名词/动词译文固定子集; src 有该词 dst 须含集合元素或 keep)。词边界完整词匹配。phrase=多词术语优先于其中单词。这是 starter 集 (高置信), 由 glossary_check.py 校验; 持续扩充。见 memory feedback-translation-consistency / feedback-wl-word-boundary。",
+  "_comment": "术语一致性表 (用户铁律: 每词译文固定子集; 词边界完整词, _下划线视为词内; phrase 多词优先)。subagent 派生 + 用户裁定 (memory→keep, context→上下文+keep context window, 多义词散文译/code·复合·字段名 keep)。glossary_check.py 校验。",
   "terms": {
-    "plan mode":   {"keep": true, "phrase": true},
-    "git worktree": {"keep": true, "phrase": true},
-    "task list":   {"zh": ["任务列表"], "phrase": true},
-    "todo list":   {"zh": ["todo 列表", "待办列表"], "phrase": true},
-
-    "worktree":    {"keep": true},
-    "workflow":    {"keep": true},
-    "subagent":    {"keep": true},
-    "pipeline":    {"keep": true},
-    "harness":     {"keep": true},
-    "transcript":  {"keep": true},
-    "stdout":      {"keep": true},
-    "stderr":      {"keep": true},
-    "schema":      {"keep": true},
-    "prompt":      {"keep": true},
-    "token":       {"keep": true},
-    "session":     {"keep": true},
-    "hook":        {"keep": true},
-    "cron":        {"keep": true},
-
-    "tool":        {"zh": ["工具"]},
-    "list":        {"zh": ["列表"]},
-    "instead":     {"zh": ["改用", "而非", "而不是", "取而代之"]},
-    "dump":        {"zh": ["转储"]},
-    "reattach":    {"zh": ["重新接入", "重新连接", "重新附加"]}
+    "context window": {
+      "keep": true,
+      "phrase": true
+    },
+    "commit message": {
+      "keep": true,
+      "phrase": true
+    },
+    "Claude Code": {
+      "keep": true,
+      "phrase": true
+    },
+    "command injection": {
+      "keep": true,
+      "phrase": true
+    },
+    "API key": {
+      "keep": true,
+      "phrase": true
+    },
+    "plan mode": {
+      "keep": true,
+      "phrase": true
+    },
+    "git worktree": {
+      "keep": true,
+      "phrase": true
+    },
+    "task list": {
+      "zh": [
+        "任务列表"
+      ],
+      "phrase": true
+    },
+    "todo list": {
+      "zh": [
+        "todo 列表",
+        "待办列表"
+      ],
+      "phrase": true
+    },
+    "name": {
+      "keep": true
+    },
+    "agent": {
+      "keep": true
+    },
+    "Claude": {
+      "keep": true
+    },
+    "claude": {
+      "keep": true
+    },
+    "json": {
+      "keep": true
+    },
+    "API": {
+      "keep": true
+    },
+    "true": {
+      "keep": true
+    },
+    "agents": {
+      "keep": true
+    },
+    "git": {
+      "keep": true
+    },
+    "JSON": {
+      "keep": true
+    },
+    "server": {
+      "keep": true
+    },
+    "MCP": {
+      "keep": true
+    },
+    "string": {
+      "keep": true
+    },
+    "bash": {
+      "keep": true
+    },
+    "assistant": {
+      "keep": true
+    },
+    "memory": {
+      "keep": true
+    },
+    "user": {
+      "zh": [
+        "用户"
+      ]
+    },
+    "file": {
+      "zh": [
+        "文件"
+      ]
+    },
+    "code": {
+      "zh": [
+        "代码"
+      ]
+    },
+    "files": {
+      "zh": [
+        "文件"
+      ]
+    },
+    "run": {
+      "zh": [
+        "运行",
+        "跑"
+      ]
+    },
+    "task": {
+      "zh": [
+        "任务"
+      ]
+    },
+    "work": {
+      "zh": [
+        "工作"
+      ]
+    },
+    "specific": {
+      "zh": [
+        "具体",
+        "特定"
+      ]
+    },
+    "first": {
+      "zh": [
+        "先",
+        "首次",
+        "第一"
+      ]
+    },
+    "call": {
+      "zh": [
+        "调用"
+      ]
+    },
+    "check": {
+      "zh": [
+        "检查",
+        "确认"
+      ]
+    },
+    "each": {
+      "zh": [
+        "每",
+        "每个"
+      ]
+    },
+    "need": {
+      "zh": [
+        "需要"
+      ]
+    },
+    "new": {
+      "zh": [
+        "新"
+      ]
+    },
+    "after": {
+      "zh": [
+        "之后",
+        "后"
+      ]
+    },
+    "output": {
+      "zh": [
+        "输出"
+      ]
+    },
+    "read": {
+      "zh": [
+        "读",
+        "读取"
+      ]
+    },
+    "current": {
+      "zh": [
+        "当前"
+      ]
+    },
+    "request": {
+      "zh": [
+        "请求"
+      ]
+    },
+    "default": {
+      "zh": [
+        "默认"
+      ]
+    },
+    "content": {
+      "zh": [
+        "内容"
+      ]
+    },
+    "text": {
+      "zh": [
+        "文本",
+        "文字"
+      ]
+    },
+    "description": {
+      "zh": [
+        "描述"
+      ]
+    },
+    "time": {
+      "zh": [
+        "时间"
+      ]
+    },
+    "line": {
+      "zh": [
+        "行"
+      ]
+    },
+    "see": {
+      "zh": [
+        "看到",
+        "看"
+      ]
+    },
+    "model": {
+      "zh": [
+        "模型"
+      ]
+    },
+    "response": {
+      "zh": [
+        "回复"
+      ]
+    },
+    "create": {
+      "zh": [
+        "创建"
+      ]
+    },
+    "input": {
+      "zh": [
+        "输入"
+      ]
+    },
+    "same": {
+      "zh": [
+        "相同",
+        "同样"
+      ]
+    },
+    "system": {
+      "zh": [
+        "系统"
+      ]
+    },
+    "error": {
+      "zh": [
+        "错误"
+      ]
+    },
+    "changes": {
+      "zh": [
+        "改动",
+        "修改",
+        "变更"
+      ]
+    },
+    "set": {
+      "zh": [
+        "设置"
+      ]
+    },
+    "result": {
+      "zh": [
+        "结果"
+      ]
+    },
+    "messages": {
+      "zh": [
+        "消息"
+      ]
+    },
+    "directly": {
+      "zh": [
+        "直接"
+      ]
+    },
+    "commands": {
+      "zh": [
+        "命令"
+      ]
+    },
+    "directory": {
+      "zh": [
+        "目录"
+      ]
+    },
+    "mode": {
+      "zh": [
+        "模式"
+      ]
+    },
+    "data": {
+      "zh": [
+        "数据"
+      ]
+    },
+    "conversation": {
+      "zh": [
+        "对话"
+      ]
+    },
+    "add": {
+      "zh": [
+        "添加",
+        "加入"
+      ]
+    },
+    "calls": {
+      "zh": [
+        "调用"
+      ]
+    },
+    "state": {
+      "zh": [
+        "状态"
+      ]
+    },
+    "write": {
+      "zh": [
+        "写",
+        "写入"
+      ]
+    },
+    "example": {
+      "zh": [
+        "例如",
+        "比如"
+      ]
+    },
+    "next": {
+      "zh": [
+        "下一步",
+        "下个"
+      ]
+    },
+    "full": {
+      "zh": [
+        "完整"
+      ]
+    },
+    "loop": {
+      "zh": [
+        "循环"
+      ]
+    },
+    "available": {
+      "zh": [
+        "可用"
+      ]
+    },
+    "project": {
+      "zh": [
+        "项目"
+      ]
+    },
+    "auto": {
+      "zh": [
+        "自动"
+      ]
+    },
+    "existing": {
+      "zh": [
+        "现有",
+        "已有"
+      ]
+    },
+    "start": {
+      "zh": [
+        "启动",
+        "开始"
+      ]
+    },
+    "field": {
+      "zh": [
+        "字段"
+      ]
+    },
+    "working": {
+      "zh": [
+        "工作"
+      ]
+    },
+    "single": {
+      "zh": [
+        "单个",
+        "一个"
+      ]
+    },
+    "end": {
+      "zh": [
+        "末尾",
+        "结束"
+      ]
+    },
+    "test": {
+      "zh": [
+        "测试"
+      ]
+    },
+    "return": {
+      "zh": [
+        "返回"
+      ]
+    },
+    "update": {
+      "zh": [
+        "更新"
+      ]
+    },
+    "context": {
+      "zh": [
+        "上下文"
+      ]
+    },
+    "message": {
+      "zh": [
+        "消息"
+      ]
+    },
+    "type": {
+      "zh": [
+        "类型"
+      ]
+    },
+    "tools": {
+      "zh": [
+        "工具"
+      ]
+    },
+    "path": {
+      "zh": [
+        "路径"
+      ]
+    },
+    "command": {
+      "zh": [
+        "命令"
+      ]
+    },
+    "status": {
+      "zh": [
+        "状态"
+      ]
+    },
+    "config": {
+      "zh": [
+        "配置"
+      ]
+    },
+    "patterns": {
+      "zh": [
+        "模式"
+      ]
+    },
+    "stop": {
+      "zh": [
+        "停止"
+      ]
+    },
+    "key": {
+      "zh": [
+        "关键",
+        "按键"
+      ]
+    },
+    "block": {
+      "zh": [
+        "块",
+        "阻塞"
+      ]
+    },
+    "Code": {
+      "zh": [
+        "代码"
+      ]
+    },
+    "tasks": {
+      "zh": [
+        "任务"
+      ]
+    },
+    "tool": {
+      "zh": [
+        "工具"
+      ]
+    },
+    "list": {
+      "zh": [
+        "列表"
+      ]
+    },
+    "instead": {
+      "zh": [
+        "改用",
+        "而非",
+        "而不是",
+        "取而代之"
+      ]
+    },
+    "dump": {
+      "zh": [
+        "转储"
+      ]
+    },
+    "reattach": {
+      "zh": [
+        "重新接入",
+        "重新连接",
+        "重新附加"
+      ]
+    }
   }
 }

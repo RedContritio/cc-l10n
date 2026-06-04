@@ -30,7 +30,9 @@ from collections import defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-WB = lambda w: re.compile(r"(?<![A-Za-z])" + re.escape(w) + r"(?![A-Za-z])")
+# 词边界: 两端非 [字母/数字/下划线] 才算完整词 —— snake_case/标识符 (file_path) 视为单 token,
+# 'path' 不在 'file_path' 中误命中 (用户铁律: 完整词匹配, 非子串)。
+WB = lambda w: re.compile(r"(?<![A-Za-z0-9_])" + re.escape(w) + r"(?![A-Za-z0-9_])")
 
 
 def load_glossary(path):
@@ -53,9 +55,25 @@ def load_pairs():
     return pairs
 
 
+_FENCE = re.compile(r"```.*?```", re.DOTALL)
+_BACKTICK = re.compile(r"`[^`\n]*`")
+_QUOTE = re.compile(r'"[^"\n]*"' + r"|'[^'\n]*'")
+_CODELINE = re.compile(r"(?m)^(?:[ \t]{2,}|\t).*$")
+_XMLTAG = re.compile(r"<[^>\n]{1,40}>")
+
+def strip_code(t):
+    """剥离 code/示例区 (fenced/反引号/引号示例/缩进代码行/<tag>) —— 这些里保留英文是对的,
+    只在散文部分判'该译却留英'。"""
+    t = _FENCE.sub(" ", t)
+    t = _CODELINE.sub(" ", t)
+    t = _BACKTICK.sub(" ", t)
+    t = _QUOTE.sub(" ", t)
+    t = _XMLTAG.sub(" ", t)
+    return t
+
 def check_pair(src, dst, words, phrases, phrase_order):
     viols = []
-    src_masked, dst_masked = src, dst
+    src_masked, dst_masked = strip_code(src), strip_code(dst)
     # phrase: keep 多词术语, 从 src/dst 抠掉 (用空格占位保边界)
     for ph in phrase_order:
         if WB(ph).search(src_masked):
@@ -63,17 +81,19 @@ def check_pair(src, dst, words, phrases, phrase_order):
                 viols.append(("phrase_keep", ph))
             src_masked = WB(ph).sub(" ", src_masked)
             dst_masked = WB(ph).sub(" ", dst_masked)
-    # 单词术语
+    # 单词术语。聚焦【keep-vs-translate 不一致】(用户核心: 同词时译时留英), 不报中文译法变体。
     for w, spec in words.items():
         if not WB(w).search(src_masked):
             continue
         if spec.get("keep"):
+            # 该 keep 却在 dst 里没了该英文词 (被译走/丢失) → 不一致
             if not WB(w).search(dst_masked):
                 viols.append(("keep_lost", w))
         else:
-            zhs = spec.get("zh", [])
-            if not any(z in dst for z in zhs):
-                viols.append(("zh_missing", w))
+            # 该译却在 dst 里仍保留了英文该词 → 不一致 (留英)。
+            # (dst 同时含中文译法属"部分译", 仍按留英计, 应彻底译。)
+            if WB(w).search(dst_masked):
+                viols.append(("kept_english", w))
     return viols
 
 
