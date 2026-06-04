@@ -15,18 +15,10 @@ CODE_PATCHES: list[tuple[bytes, bytes, str]] = [
         "CC client bug: IQ8 在 tools 非空时仍发 scope:'global' 触发 API "
         "'system[0] is not a true prefix' 校验错. 改为 org 跳过 global cache 校验.",
     ),
-    (
-        b'P1()?`\\`find\\`/${tO}, \\`grep\\`/${J5}, and ${A9}`:`${tO}, ${J5}, and ${A9}`',
-        "P1()?`\\`find\\`/${tO}, \\`grep\\`/${J5}、和 ${A9}`:`${tO}, ${J5}、和 ${A9}`".encode(),
-        "FN=0 模板 frag: EnterPlanMode '1. Use Glob, Grep, and Read' 的 ', and ' 是 57 处共享 "
-        "tmpl_frag, decode-match 无法单译; 字节级译 'and'→'和' (ternary 两支)。",
-    ),
-    (
-        "改用 ${qK} instead.`;r".encode(),
-        "改用 ${qK}。`;r".encode(),
-        "FN=0 模板 frag: Write 'use Edit instead.' 的 ' instead.' 共享 frag; 译后 '请改用 Edit "
-        "instead' 冗余, 字节级删 'instead' (post-translation 中文'改用'锚定唯一)。",
-    ),
+    # FN=0 模板 frag 的字节级 patch (EnterPlanMode 'and'→'和' / Write 删 'instead') 暂停用:
+    # src 锚定 post-translation 字节, 与相邻译条 (35 的 '2. Understand...') 边界交互致脆,
+    # 译表一改即失配 raise 中断 install。待 build_fn0_code_patches.py 自动重算后再启用。
+    # 这 2 个 token 是 57/14 处共享 tmpl_frag, 暂回退为 CAPTURE 残留 2 (and/instead)。
 ]
 
 
