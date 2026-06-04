@@ -89,9 +89,11 @@ STATIC `verify`(检 `untranslated_prompt`),**不跑 apply 的 hit-overlap audit*
 
 ## 11. parse-monitor 实现 / 文档对齐(两轮对抗评审剩余,均 minor)
 
-诊断工具线。两轮对抗评审(2026-06-05)对 `tools/parse_monitor/` 的发现;唯一 important
-(静默文本化逃逸检测)已修(commit 2078c37,真环境 243K 行零误报)。剩余经第二层验证全部
-降为 minor,待后续:
+诊断工具线。对抗评审(2026-06-05)对 `tools/parse_monitor/` 的发现。SILENT 静默逃逸检测
+已修(2078c37);第三轮 review(验修复 commit)又发现 2 个 important —— SILENT 对 fenced
+代码块假阳性 + SILENT 跨请求错并(真实数据复现)—— 已修(8c6d70b:fenced 守卫 + note_prompt
+继承链,"零误报"诚实降级为 best-effort)。下列 minor 待后续(3g 的 SILENT 声明已随 8c6d70b
+落地,余 probe/mtime 表述待 3c/3d):
 
 - 3b:incident `first_line`/`last_line` 实为本批起始字节偏移而非行号(生产前 23 条为 0,
   `watcher.py:66` 传 `off` / `incident.py:60-61`)。改 `read_new_lines`/`scan_once` 传该记录
@@ -130,3 +132,15 @@ reviewer(2026-06-05)发现的统计严谨性问题,公开发布前应修:
   统计量。改"对抗性自审(Opus 4.8 作批评方)"+ 注明非独立第三方评审 / 非统计置信区间。
 - "所有 p 值为单尾"与 Mann-Kendall 实际用双尾(`analyze_drift_significance.py:151`)矛盾。
   区分说明(Sign/Wilcoxon 单尾;MK 双尾,仅用于对话内趋势计数)。
+
+## 13. 第三轮评审残留 minor(test-quality / 边界,非阻断,跨工具)
+
+review 修复 commit 时发现,均不影响功能,补强可选:
+
+- `detect_retry_in_request` 的 tool_result block 路径有代码无测试(主路径 plain string 已
+  覆盖、binary 实证无漏报);补 `test_detect_retry_in_tool_result_block`。
+- `extract_project_name` 对"项目目录名本身含 `-Projects-`"(如 `-Users-x-Projects-Research-Projects-X`)
+  rsplit 锚点截短错(返回 X 而非 Research-Projects-X,罕见);补测试,需要时改捕获组。
+- `test_capture_proxy_integration` 未断言 resp_sse_raw 落盘内容、502 路径"无 log";补断言。
+- `test_silent_no_false_positive_on_discussion_backtick` 名称只覆盖行内反引号(fenced 已另测);
+  可改名或合并。
