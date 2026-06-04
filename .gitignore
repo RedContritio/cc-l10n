@@ -34,6 +34,9 @@ cc-zh-reports/
 # capture_proxy 落盘 (含完整对话/prompt, 敏感, 绝不入 git)
 .capture/
 
+# 语言漂移分析运行时产物 (analyze_all_conversations.py 生成)
+tools/conversation_drift_report.tsv
+
 # 历史 / 调试输出
 _probe_*.py
 *.report.json
