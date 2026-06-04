@@ -144,3 +144,13 @@ review 修复 commit 时发现,均不影响功能,补强可选:
 - `test_capture_proxy_integration` 未断言 resp_sse_raw 落盘内容、502 路径"无 log";补断言。
 - `test_silent_no_false_positive_on_discussion_backtick` 名称只覆盖行内反引号(fenced 已另测);
   可改名或合并。
+- (第四轮) `note_prompt` 使 HARD 可能继承同 session 后续 user 的 promptId, 致 SOFT 与 HARD
+  分裂为两个 incident。仅当 SOFT→HARD 之间夹入真实 user turn 才触发, 而 CC 的 SOFT→HARD 是同
+  一次重试的连续注入、中间无 user turn, 故正常流程不触发(理论边界, 未来 CC 行为变更才需修)。
+- (第四轮) SILENT 端到端测试 `test_scan_once_silent_not_misattributed_across_prompts` 未覆盖
+  "fenced 闭合围栏之后的真逃逸"(detect 层 `test_silent_real_escape_after_fenced_block` 已覆盖);
+  可在 scan_once 端到端补一条。
+
+> 注: parse_monitor SILENT 经 5 轮 loop-until-dry 对抗评审收敛(2026-06-05): 第三轮发现漏抓
+> 静默变体→实现; 第四轮发现 fenced 守卫(前一行启发式)FN→改全局区间追踪; 第五轮零 important
+> 收敛(UTF-8/边界全过, 真环境 silent=14 不变)。修复 commit: 2078c37/8c6d70b/cdd2a40/91ef34e。
