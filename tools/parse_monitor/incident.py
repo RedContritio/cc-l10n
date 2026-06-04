@@ -7,6 +7,10 @@ promptId, 继承同 session 最近见到的 promptId。不同 session 不合并�
 """
 from __future__ import annotations
 
+# 严重度高低: hard > soft > silent。silent (文本化逃逸) 不参与 CC 注入的 soft→hard 链,
+# 但同一 incident 内可被 soft/hard 覆盖 (severity 取最重)。
+_SEVERITY_RANK = {"silent": 0, "soft": 1, "hard": 2}
+
 
 def build_incident_record(rec, classification, transcript_path, line_no) -> dict:
     """单条标记记录 → 扁平 incident 字段 (不做归并)."""
@@ -52,6 +56,7 @@ class IncidentGrouper:
                 "gitBranch": rec.get("gitBranch"),
                 "version": rec.get("version"),
                 "severity": severity,
+                "silent_count": 0,
                 "soft_count": 0,
                 "hard_count": 0,
                 "first_ts": rec.get("timestamp"),
@@ -68,13 +73,10 @@ class IncidentGrouper:
             inc["last_line"] = line_no
 
         escalated = False
-        if severity == "soft":
-            inc["soft_count"] += 1
-        else:
-            inc["hard_count"] += 1
-            if inc["severity"] != "hard":
-                inc["severity"] = "hard"
-                escalated = True
+        inc[f"{severity}_count"] += 1
+        if _SEVERITY_RANK.get(severity, 0) > _SEVERITY_RANK.get(inc["severity"], 0):
+            inc["severity"] = severity
+            escalated = True
 
         return {"incident": inc, "is_new": is_new, "escalated": escalated}
 

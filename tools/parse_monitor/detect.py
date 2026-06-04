@@ -8,10 +8,17 @@
 """
 from __future__ import annotations
 
+import re
+
 HARD_MARKER = "The model's tool call could not be parsed (retry also failed)."
 SOFT_MARKER = "Your tool call was malformed and could not be parsed. Please retry."
 
 SYNTHETIC_MODEL = "<synthetic>"
+
+# 损坏的 <function_calls> opener 单独成行 (core/care/court/course/... 是 function_calls
+# 被 tokenizer 切坏的碎片) 紧跟逃逸的 <invoke name=。best-effort: 仅匹配此已知形态,
+# 故对反引号引用 / 句中提及该标签零误报, 但可能漏报未来新的损坏形态 (见 DESIGN 局限)。
+_SILENT_ESCAPE_RE = re.compile(r"\n[a-z]{2,12}\n<invoke name=")
 
 
 def classify_record(rec) -> dict | None:
@@ -38,5 +45,18 @@ def classify_record(rec) -> dict | None:
                         and block.get("type") == "text"
                         and block.get("text") == HARD_MARKER):
                     return {"severity": "hard", "marker": HARD_MARKER}
+
+    # SILENT: 工具调用文本化逃逸 (模型把 <function_calls> 吐成文本, opener 损坏成裸词).
+    # CC 仅在 stop_reason==tool_use 时注入 SOFT/HARD, 故 stop!=tool_use 的逃逸 retry
+    # 路径漏抓。结构谓词 (损坏 opener 行 + 无 tool_use 块 + stop!=tool_use) 保零误报。
+    if rec.get("type") == "assistant":
+        content = msg.get("content")
+        if isinstance(content, list):
+            has_tool_use = any(isinstance(b, dict) and b.get("type") == "tool_use" for b in content)
+            if not has_tool_use and msg.get("stop_reason") != "tool_use":
+                for block in content:
+                    if (isinstance(block, dict) and block.get("type") == "text"
+                            and _SILENT_ESCAPE_RE.search(block.get("text") or "")):
+                        return {"severity": "silent", "marker": "<invoke name= (textualized escape)"}
 
     return None

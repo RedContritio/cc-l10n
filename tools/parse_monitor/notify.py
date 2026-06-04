@@ -25,7 +25,8 @@ def format_message(incident) -> str:
     project = os.path.basename((incident.get("project") or "").rstrip("/")) or "?"
     return (f"[CC parse {incident.get('severity', '?')}] {project} "
             f"({incident.get('version', '?')}, {_patch_label(incident)}) — "
-            f"soft×{incident.get('soft_count', 0)}/hard×{incident.get('hard_count', 0)} "
+            f"silent×{incident.get('silent_count', 0)}/soft×{incident.get('soft_count', 0)}"
+            f"/hard×{incident.get('hard_count', 0)} "
             f"@ {incident.get('first_ts', '?')}")
 
 

@@ -50,6 +50,18 @@ def _hard_record(text=HARD, model="<synthetic>", api_err=True, type_="assistant"
     return rec
 
 
+def _silent_record(text='完成验证。\n\ncore\n<invoke name="Bash">\n<parameter name="command">ls</parameter>\n</invoke>',
+                   stop="end_turn", with_tool_use=False, session="s1",
+                   ts="2026-06-01T07:04:00.000Z"):
+    content = [{"type": "text", "text": text}]
+    if with_tool_use:
+        content.append({"type": "tool_use", "id": "tu1", "name": "Bash", "input": {}})
+    return {"type": "assistant", "timestamp": ts, "sessionId": session, "cwd": "/p",
+            "version": "2.1.159", "gitBranch": "main",
+            "message": {"role": "assistant", "model": "claude-opus-4-8", "type": "message",
+                        "stop_reason": stop, "content": content}}
+
+
 # ---------- [detect] 正例 ----------
 
 def test_classify_hard_positive():
@@ -99,6 +111,42 @@ def test_soft_wrong_type_rejected():
     assert classify_record(rec) is None
 
 
+# ---------- [detect] 静默文本化逃逸 (best-effort, 仅已知损坏 opener 形态) ----------
+
+def test_classify_silent_escape_positive():
+    # 损坏 function_calls opener (core) 单独成行紧跟 invoke, 无 tool_use 块, stop=end_turn
+    r = classify_record(_silent_record())
+    assert r is not None and r["severity"] == "silent"
+
+
+def test_silent_escape_other_broken_openers():
+    for op in ("care", "court", "course"):
+        rec = _silent_record(text=f'内容\n\n{op}\n<invoke name="Read">x</invoke>')
+        assert classify_record(rec)["severity"] == "silent", op
+
+
+def test_silent_not_flagged_when_tool_use_present():
+    # 有 tool_use 块 = 正常工具调用 (即便附带文本含 invoke), 非逃逸
+    assert classify_record(_silent_record(with_tool_use=True)) is None
+
+
+def test_silent_not_flagged_when_stop_is_tool_use():
+    # stop=tool_use 走 SOFT/HARD retry 路径, 不归 silent (避免重复计数)
+    assert classify_record(_silent_record(stop="tool_use")) is None
+
+
+def test_silent_no_false_positive_on_discussion_backtick():
+    # 讨论该 bug: invoke 被反引号 markdown 引用 (非损坏 opener 裸词行) → 零误报
+    rec = _silent_record(text="正确谓词应是 assistant text 块含 `<invoke name=` 且无 tool_use 块")
+    assert classify_record(rec) is None
+
+
+def test_silent_no_false_positive_on_inline_mention():
+    # 句中提及 invoke (无独立的损坏 opener 行) → 零误报
+    rec = _silent_record(text="模型把 <invoke name=Bash> 当成文本吐出来了")
+    assert classify_record(rec) is None
+
+
 # ---------- [detect] 健壮性 ----------
 
 def test_empty_record_returns_none():
@@ -131,6 +179,41 @@ def test_build_incident_record_fields():
 
 def _add(g, rec, path="/t.jsonl", line=1):
     return g.add(rec, classify_record(rec), path, line)
+
+
+def test_grouper_silent_incident():
+    g = IncidentGrouper()
+    r = _add(g, _silent_record())
+    assert r["is_new"] is True
+    assert r["incident"]["severity"] == "silent"
+    assert r["incident"]["silent_count"] == 1
+
+
+def test_grouper_silent_then_hard_escalates():
+    g = IncidentGrouper()
+    _add(g, _silent_record(), line=1)
+    r = _add(g, _hard_record(), line=2)   # 同 session, 同归并 key
+    inc = r["incident"]
+    assert r["escalated"] is True
+    assert inc["severity"] == "hard"
+    assert inc["silent_count"] == 1 and inc["hard_count"] == 1
+
+
+def test_grouper_hard_then_silent_no_downgrade():
+    g = IncidentGrouper()
+    _add(g, _hard_record(), line=1)
+    r = _add(g, _silent_record(), line=2)
+    inc = r["incident"]
+    assert inc["severity"] == "hard"        # silent 不降级已有 hard
+    assert r["escalated"] is False
+    assert inc["silent_count"] == 1 and inc["hard_count"] == 1
+
+
+def test_format_message_includes_silent_count():
+    inc = {"severity": "silent", "project": "/p/proj", "version": "2.1.159",
+           "silent_count": 2, "soft_count": 0, "hard_count": 0, "first_ts": "T"}
+    msg = format_message(inc)
+    assert "silent×2" in msg and "parse silent" in msg
 
 
 def test_grouper_soft_then_hard_one_incident():
