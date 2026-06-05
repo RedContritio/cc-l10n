@@ -29,6 +29,8 @@ binary 内的工具与 agent 描述是带 `${}` 插值的模板字面量,且由�
 
 静态评分依赖手维护的动词表 + 内容相似度阈值,二者都有盲区(动词表漏词;散文被插值切碎)。
 
+**(2026-06-05 升级方向, 用户确认)** 更根本: score 阈值本身就是被 feedback-no-tolerance-thresholds 禁止的密度阈值 —— `untranslated_prompt=0` 只卡 score>=5, weak-class(2-4) 不计入,掩盖了被划为 weak 的真 CC prompt 残留(2.1.163 weak 约 4700 条,粗估混着真 CC prompt + 大量第三方库 SDK 串 + CC 配置 schema `.describe()`)。**正解 = 废 score 阈值,改"扫全量英文 − 显式 whitelist(含第三方库语料 + `.describe()`/工具-description 上下文去噪) = 残留"**,见 weak-residual-exclusion-plan。下列 3a/3b 是退而求其次的评分改进,真正治本是换判据。
+
 - 3a(便宜、通用):评分前先重组模板片段(片段 + `${}` 占位),整体判为 prompt 则
   要求其全部片段必翻。
 - 3b(较重、可选):按角色识别描述(注册位 `description:` 字段的值),无视评分强制要求。
