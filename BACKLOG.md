@@ -45,7 +45,10 @@ binary 内的工具与 agent 描述是带 `${}` 插值的模板字面量,且由�
 
 ## 5. 自动更新会覆盖补丁
 
-Claude Code 自动更新会替换 binary,补丁丢失,更新后需重跑 `install`。
+Claude Code 自动更新会替换 binary,补丁丢失,更新后需重跑 `install`。**(2026-06-05 实锤)**
+2.1.162.zh 被自动更新到 2.1.163 覆盖, active 一度变回原版英文; 已补译 18 条新 prompt + 重
+install 恢复 (active=2.1.163.zh, commit 291ffc5)。本次又印证: 每次新版本发布都要手动重跑
+install (+ 可能补译新 prompt)。
 
 - 可选改进:版本变更时自动重应用(post-update 钩子或包装器)。
 
@@ -154,3 +157,14 @@ review 修复 commit 时发现,均不影响功能,补强可选:
 > 注: parse_monitor SILENT 经 5 轮 loop-until-dry 对抗评审收敛(2026-06-05): 第三轮发现漏抓
 > 静默变体→实现; 第四轮发现 fenced 守卫(前一行启发式)FN→改全局区间追踪; 第五轮零 important
 > 收敛(UTF-8/边界全过, 真环境 silent=14 不变)。修复 commit: 2078c37/8c6d70b/cdd2a40/91ef34e。
+
+## 14. 2.1.163 译文第二轮 QC (轻 minor, l10n 线)
+
+2.1.163 适配 (commit 291ffc5, active=2.1.163.zh, verify=0) 第一轮翻译 + 代码块逐字还原已上线;
+按 cc-l10n 两轮 QC 传统, 第二轮散文复核待做:
+
+- #12 (`# Package source shape` design-sync 子文档) 文档级 `##` 标题部分中文部分英文不一致
+  (代码块内 bash 注释已随代码块还原修正)。统一: 全英文 (同 design-sync 章节标题保留, 防交叉
+  引用断锚) 或全中文。不影响 verify=0 / 功能。
+- 18 条散文逐条只读 QC: workflow 第二层验证已过 (14 ok + 4 minor 已修代码块/inline), 但术语
+  一致性 / glossary、个别长文档 (Cowork 19K / Package source 32K) 的细节漂移可再核一轮。
